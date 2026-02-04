@@ -1,64 +1,25 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../api/auth/[...nextauth]/route";
+import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 
-function parseAllowlist(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function isAllowedHost(hostname: string, allow: string[]): boolean {
-  const h = hostname.toLowerCase();
-
-  // Always allow our own domains.
-  if (h === "flexrz.com" || h.endsWith(".flexrz.com")) return true;
-
-  // Exact match allowlist entries (recommended).
-  if (allow.includes(h)) return true;
-
-  // Optional wildcard entries like "*.example.com"
-  for (const entry of allow) {
-    if (entry.startsWith("*.")) {
-      const suffix = entry.slice(1); // ".example.com"
-      if (h.endsWith(suffix)) return true;
-    }
-  }
-
-  return false;
-}
-
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const to = url.searchParams.get("to");
+  const to = url.searchParams.get("to") || "https://flexrz.com";
 
-  const baseUrl = process.env.NEXTAUTH_URL || "https://auth.flexrz.com";
-  const fallback = "https://www.flexrz.com";
+  // Read the NextAuth JWT directly from cookies in THIS request
+  const token = await getToken({
+    req,
+    secret: process.env.NEXTAUTH_SECRET,
+  });
 
-  if (!to) return NextResponse.redirect(fallback);
+  const idToken = (token as any)?.googleIdToken as string | undefined;
 
-  try {
-    const dest = new URL(to);
+  // Build redirect back to the destination
+  const dest = new URL(to);
 
-    // Only allow https destinations.
-    if (dest.protocol !== "https:") return NextResponse.redirect(baseUrl);
-
-    const allow = parseAllowlist(process.env.AUTH_CALLBACK_HOST_ALLOWLIST);
-    if (!isAllowedHost(dest.hostname, allow)) return NextResponse.redirect(baseUrl);
-
-    // Pull tokens from the current auth session (same-site, so cookies work here).
-    const session: any = await getServerSession(authOptions);
-    const idToken: string | null = session?.googleIdToken || session?.accessToken || null;
-
-    // If we have a token, pass it as a URL fragment so it doesn't hit logs/proxies as a querystring.
-    if (idToken) {
-      dest.hash = `id_token=${encodeURIComponent(idToken)}`;
-    }
-
-    return NextResponse.redirect(dest.toString());
-  } catch {
-    return NextResponse.redirect(baseUrl);
+  // If we have the Google id_token, attach it as a hash so the main app can capture it
+  if (idToken) {
+    dest.hash = `id_token=${encodeURIComponent(idToken)}`;
   }
+
+  return NextResponse.redirect(dest.toString(), 302);
 }
