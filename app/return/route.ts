@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../api/auth/[...nextauth]/route";
 
 function parseAllowlist(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -28,28 +30,31 @@ function isAllowedHost(hostname: string, allow: string[]): boolean {
   return false;
 }
 
-export function GET(req: Request) {
+export async function GET(req: Request) {
   const url = new URL(req.url);
   const to = url.searchParams.get("to");
 
   const baseUrl = process.env.NEXTAUTH_URL || "https://auth.flexrz.com";
   const fallback = "https://www.flexrz.com";
 
-  if (!to) {
-    return NextResponse.redirect(fallback);
-  }
+  if (!to) return NextResponse.redirect(fallback);
 
   try {
     const dest = new URL(to);
 
     // Only allow https destinations.
-    if (dest.protocol !== "https:") {
-      return NextResponse.redirect(baseUrl);
-    }
+    if (dest.protocol !== "https:") return NextResponse.redirect(baseUrl);
 
     const allow = parseAllowlist(process.env.AUTH_CALLBACK_HOST_ALLOWLIST);
-    if (!isAllowedHost(dest.hostname, allow)) {
-      return NextResponse.redirect(baseUrl);
+    if (!isAllowedHost(dest.hostname, allow)) return NextResponse.redirect(baseUrl);
+
+    // Pull tokens from the current auth session (same-site, so cookies work here).
+    const session: any = await getServerSession(authOptions);
+    const idToken: string | null = session?.googleIdToken || session?.accessToken || null;
+
+    // If we have a token, pass it as a URL fragment so it doesn't hit logs/proxies as a querystring.
+    if (idToken) {
+      dest.hash = `id_token=${encodeURIComponent(idToken)}`;
     }
 
     return NextResponse.redirect(dest.toString());
