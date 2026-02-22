@@ -4,8 +4,11 @@ import { signIn } from "next-auth/react";
 
 export function SignInCard({ callbackUrl }: { callbackUrl: string }) {
   const onClick = async () => {
-    // Force an account chooser so users aren't "stuck" in the last Google account.
-    await signIn("google", { callbackUrl }, { prompt: "select_account" });
+    // IMPORTANT: Always bounce through the auth broker's /return route.
+    // This makes the post-login redirect deterministic and avoids cases where
+    // NextAuth normalizes or drops the path and sends users to app.flexrz.com/.
+    const to = encodeURIComponent(callbackUrl);
+    await signIn("google", { callbackUrl: `/return?to=${to}` });
   };
 
   return (
