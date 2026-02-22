@@ -1,6 +1,5 @@
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
 import { authOptions } from "@/lib/auth/options";
 import { SignInCard } from "./SignInCard";
 
@@ -45,39 +44,11 @@ export default async function SignInPage({
 }) {
   const callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl);
 
-  // If the callbackUrl points to a tenant path on app.flexrz.com, persist it as
-  // a shared cookie so the app root (https://app.flexrz.com/) can immediately
-  // route users back into their last tenant after login.
-  //
-  // This makes the flow robust even if some OAuth/provider edge cases drop the
-  // callback path and return users to app root.
-  try {
-    const u = new URL(callbackUrl);
-    const host = u.hostname.toLowerCase();
-    if (host === "app.flexrz.com") {
-      const m = u.pathname.match(/^\/tenant\/([a-z0-9-]{2,80})(?:\/|$)/i);
-      const slug = m?.[1] || "";
-      if (slug) {
-        const c = await cookies();
-        c.set("flexrz_last_tenant", slug, {
-          path: "/",
-          sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
-          // Share across all subdomains.
-          domain:
-            process.env.NODE_ENV === "production" ? ".flexrz.com" : undefined,
-          maxAge: 60 * 60 * 24 * 30, // 30 days
-        });
-      }
-    }
-  } catch {
-    // ignore
-  }
-
   // If already logged in, immediately return to the app.
   const session = await getServerSession(authOptions);
   if (session) {
-    redirect(callbackUrl);
+    const to = encodeURIComponent(callbackUrl);
+    redirect(`/return?to=${to}`);
   }
 
   return <SignInCard callbackUrl={callbackUrl} />;
