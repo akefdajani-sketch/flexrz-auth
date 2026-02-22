@@ -7,7 +7,16 @@ function getRequiredEnv(name: string): string {
   return v;
 }
 
-const COOKIE_DOMAIN = process.env.NEXTAUTH_COOKIE_DOMAIN || undefined;
+/**
+ * IMPORTANT (SaaS):
+ * We want auth.flexrz.com to mint session cookies that are readable by
+ * app.flexrz.com and owner.flexrz.com.
+ *
+ * In production we default to `.flexrz.com` unless overridden.
+ */
+const COOKIE_DOMAIN =
+  (process.env.NEXTAUTH_COOKIE_DOMAIN || "").trim() ||
+  (process.env.NODE_ENV === "production" ? ".flexrz.com" : undefined);
 
 // Allow redirects back to app/owner + localhost for dev.
 function isAllowedRedirect(url: string): boolean {
@@ -93,7 +102,7 @@ export const authOptions: NextAuthOptions = {
         sameSite: "lax",
         path: "/",
         secure: process.env.NODE_ENV === "production",
-        ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
+        // __Host- cookies MUST NOT set a Domain attribute.
       },
     },
   },
