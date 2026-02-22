@@ -4,7 +4,8 @@ import { signIn } from "next-auth/react";
 
 export function SignInCard({ callbackUrl }: { callbackUrl: string }) {
   const onClick = async () => {
-    await signIn("google", { callbackUrl });
+    // Force an account chooser so users aren't "stuck" in the last Google account.
+    await signIn("google", { callbackUrl }, { prompt: "select_account" });
   };
 
   return (
