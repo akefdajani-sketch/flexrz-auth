@@ -46,6 +46,9 @@ export const authOptions: NextAuthOptions = {
       // Relative URLs are always safe.
       if (url.startsWith("/")) return `${baseUrl}${url}`;
 
+      // Allow redirects that stay on the auth broker itself (e.g. /return?to=...)
+      if (url.startsWith(baseUrl)) return url;
+
       // Only allow sending the user back to approved app domains.
       if (isAllowedRedirect(url)) return url;
 
