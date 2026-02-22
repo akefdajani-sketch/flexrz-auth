@@ -6,10 +6,20 @@ export const authOptions: NextAuthOptions = {
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      authorization: {
+        params: {
+          // Always show an account chooser so users can switch accounts easily.
+          prompt: "select_account",
+        },
+      },
     }),
   ],
   secret: process.env.NEXTAUTH_SECRET,
   session: { strategy: "jwt" },
+  // Ensure we always use the branded sign-in UI (avoid NextAuth's default page).
+  pages: {
+    signIn: "/auth/signin",
+  },
   callbacks: {
     /**
      * Allow redirecting back to other Flexrz subdomains after sign-in.
