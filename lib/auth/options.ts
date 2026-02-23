@@ -1,156 +1,134 @@
+
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
-function getRequiredEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var: ${name}`);
-  return v;
-}
+// Function to refresh Google access token using stored refresh token
+async function refreshGoogleAccessToken(token: any) {
+  const refreshToken = token?.google_refresh_token;
+  if (!refreshToken) {
+    return { ...token, error: "no_refresh_token" };
+  }
 
-/**
- * We want auth.flexrz.com to mint cookies readable by app.flexrz.com / owner.flexrz.com.
- * In production we default to `.flexrz.com` unless overridden.
- */
-const COOKIE_DOMAIN =
-  (process.env.NEXTAUTH_COOKIE_DOMAIN || "").trim() ||
-  (process.env.NODE_ENV === "production" ? ".flexrz.com" : undefined);
+  const clientId = process.env.GOOGLE_CLIENT_ID || "";
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET || "";
 
-function isAllowedRedirect(url: string): boolean {
+  if (!clientId || !clientSecret) {
+    return { ...token, error: "missing_google_client_env" };
+  }
+
   try {
-    const u = new URL(url);
-    const host = u.host;
-    return (
-      host === "app.flexrz.com" ||
-      host === "owner.flexrz.com" ||
-      host === "localhost:3000" ||
-      host === "localhost:3001" ||
-      host === "127.0.0.1:3000" ||
-      host === "127.0.0.1:3001"
-    );
-  } catch {
-    return false;
+    const body = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    });
+
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+
+    const json = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      return {
+        ...token,
+        error: "refresh_failed",
+        refresh_error: json || { status: res.status },
+      };
+    }
+
+    const newAccessToken = json?.access_token;
+    const expiresInSec = json?.expires_in;
+
+    const newExpiryMs =
+      typeof expiresInSec === "number" ? Date.now() + expiresInSec * 1000 : undefined;
+
+    return {
+      ...token,
+      google_access_token: newAccessToken || token.google_access_token,
+      google_access_token_expires_at_ms: newExpiryMs || token.google_access_token_expires_at_ms,
+      google_refresh_token: json?.refresh_token || token.google_refresh_token,
+      google_id_token: json?.id_token || token.google_id_token,
+      error: null,
+    };
+  } catch (e: any) {
+    return { ...token, error: "refresh_exception", refresh_error: String(e?.message || e) };
   }
 }
 
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
-      clientId: getRequiredEnv("GOOGLE_CLIENT_ID"),
-      clientSecret: getRequiredEnv("GOOGLE_CLIENT_SECRET"),
-      // Optional: helps ensure refresh tokens are issued on first consent.
-      authorization: { params: { prompt: "consent", access_type: "offline", response_type: "code" } },
+      clientId: process.env.GOOGLE_CLIENT_ID || "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+      authorization: {
+        params: {
+          access_type: "offline",  // Ensures Google returns refresh token
+          prompt: "consent",  // Forces Google to issue a refresh token
+        },
+      },
     }),
   ],
 
-  pages: {
-    signIn: "/auth/signin",
-  },
+  secret: process.env.NEXTAUTH_SECRET,
 
   session: {
     strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    updateAge: 6 * 60 * 60, // Re-issue session JWT every 6 hours
+  },
+
+  jwt: {
+    maxAge: 30 * 24 * 60 * 60, // Align with session maxAge
   },
 
   callbacks: {
-    /**
-     * IMPORTANT:
-     * Put Google tokens onto the JWT so `getToken()` in app.flexrz.com can read them.
-     */
-    async jwt({ token, account, profile }) {
-      // Initial sign-in (account is present)
-      if (account) {
-        // These are the keys your proxy is already trying to read:
-        // google_id_token / google_access_token (and legacy fallbacks)
-        (token as any).google_id_token = (account as any).id_token ?? (token as any).google_id_token;
-        (token as any).google_access_token = (account as any).access_token ?? (token as any).google_access_token;
+    async jwt({ token, account }) {
+      if (account?.provider === "google") {
+        const idToken = (account as any).id_token as string | undefined;
+        const accessToken = (account as any).access_token as string | undefined;
+        const refreshToken = (account as any).refresh_token as string | undefined;
 
-        // Optional: keep refresh token if Google returns it
-        (token as any).google_refresh_token =
-          (account as any).refresh_token ?? (token as any).google_refresh_token;
+        const expiresAtSec = (account as any).expires_at as number | undefined;
+        const expiresInSec = (account as any).expires_in as number | undefined;
 
-        // Keep stable identity fields
-        if (profile && (profile as any).sub) (token as any).sub = (profile as any).sub;
-        if (profile && (profile as any).email) (token as any).email = (profile as any).email;
-        if (profile && ((profile as any).name || (profile as any).given_name || (profile as any).family_name)) {
-          (token as any).name =
-            (profile as any).name ||
-            `${(profile as any).given_name || ""} ${(profile as any).family_name || ""}`.trim();
-        }
+        const expiryMs =
+          typeof expiresAtSec === "number"
+            ? expiresAtSec * 1000
+            : typeof expiresInSec === "number"
+              ? Date.now() + expiresInSec * 1000
+              : undefined;
+
+        (token as any).google_id_token = idToken;
+        (token as any).google_access_token = accessToken;
+        (token as any).google_refresh_token = refreshToken || (token as any).google_refresh_token;
+        (token as any).google_access_token_expires_at_ms =
+          expiryMs || (token as any).google_access_token_expires_at_ms;
+
+        (token as any).error = null;
+        return token;
       }
 
-      return token;
+      const expMs = (token as any).google_access_token_expires_at_ms as number | undefined;
+
+      if (!expMs) return token;
+
+      const shouldRefresh = Date.now() > expMs - 60_000;
+      if (!shouldRefresh) return token;
+
+      const refreshed = await refreshGoogleAccessToken(token);
+      return refreshed;
     },
 
-    /**
-     * Optional: expose tokens to session JSON (useful for debugging at /api/auth/session)
-     * This does NOT affect cookie decoding; it just makes inspection easier.
-     */
     async session({ session, token }) {
-      (session as any).googleIdToken = (token as any).google_id_token;
-      (session as any).googleAccessToken = (token as any).google_access_token;
-      (session as any).sub = (token as any).sub;
-
-      if (session.user) {
-        session.user.email = session.user.email || ((token as any).email as any);
-        session.user.name = session.user.name || ((token as any).name as any);
-      }
+      (session as any).google_id_token = (token as any).google_id_token || null;
+      (session as any).google_access_token = (token as any).google_access_token || null;
+      (session as any).tokenError = (token as any).error || null;
 
       return session;
-    },
-
-    async redirect({ url, baseUrl }) {
-      // Relative URLs are always safe.
-      if (url.startsWith("/")) return `${baseUrl}${url}`;
-
-      // Allow redirects that stay on auth broker itself.
-      if (url.startsWith(baseUrl)) return url;
-
-      // Allow approved app domains.
-      if (isAllowedRedirect(url)) return url;
-
-      // Fallback: stay on auth domain.
-      return baseUrl;
-    },
-  },
-
-  cookies: {
-    // Make session cookies available across *.flexrz.com
-    sessionToken: {
-      name:
-        process.env.NODE_ENV === "production"
-          ? "__Secure-next-auth.session-token"
-          : "next-auth.session-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: process.env.NODE_ENV === "production",
-        ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
-      },
-    },
-    callbackUrl: {
-      name:
-        process.env.NODE_ENV === "production"
-          ? "__Secure-next-auth.callback-url"
-          : "next-auth.callback-url",
-      options: {
-        sameSite: "lax",
-        path: "/",
-        secure: process.env.NODE_ENV === "production",
-        ...(COOKIE_DOMAIN ? { domain: COOKIE_DOMAIN } : {}),
-      },
-    },
-    csrfToken: {
-      name:
-        process.env.NODE_ENV === "production"
-          ? "__Host-next-auth.csrf-token"
-          : "next-auth.csrf-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: process.env.NODE_ENV === "production",
-        // __Host- cookies MUST NOT set a Domain attribute.
-      },
     },
   },
 };
