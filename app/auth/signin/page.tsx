@@ -19,13 +19,19 @@ function isAllowedHost(host: string) {
 
 function safeDecode(v: string) {
   if (!v) return "";
-  // Decode once, but never throw.
-  // (callbackUrl often arrives encoded from upstream redirect hops.)
-  try {
-    return decodeURIComponent(v);
-  } catch {
-    return v;
+  // Decode up to 2 times, but never throw.
+  // Handles cases where callbackUrl is double-encoded through multiple redirect hops.
+  let out = v;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const dec = decodeURIComponent(out);
+      if (dec === out) break;
+      out = dec;
+    } catch {
+      break;
+    }
   }
+  return out;
 }
 
 function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
