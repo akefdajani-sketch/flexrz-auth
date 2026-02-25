@@ -101,6 +101,7 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async redirect({ url, baseUrl }) {
+      const DEBUG = process.env.AUTH_DEBUG_REDIRECT === "1";
       // NextAuth sometimes stores callbackUrl in an encoded form (e.g.
       // "https%3A%2F%2Fflexrz.com%2Fbook%2Fbirdie-golf"). If we treat that
       // as a raw URL, `new URL(url)` throws and we fall back to baseUrl,
@@ -114,7 +115,9 @@ export const authOptions: NextAuthOptions = {
             const dv = decodeURIComponent(v);
             if (dv === v) break;
             v = dv;
-          } catch {
+          } catch (e) {
+        if (DEBUG) console.warn("[AUTH redirect] exception, fallback baseUrl:", String((e as any)?.message || e));
+
             break;
           }
         }
@@ -123,6 +126,11 @@ export const authOptions: NextAuthOptions = {
 
       try {
         const candidate = decodeMaybe(url);
+        if (DEBUG) {
+          console.info("[AUTH redirect] raw url=", url);
+          console.info("[AUTH redirect] decoded candidate=", candidate);
+          console.info("[AUTH redirect] baseUrl=", baseUrl);
+        }
 
         // Relative paths
         if (candidate.startsWith("/")) return new URL(candidate, baseUrl).toString();
@@ -134,8 +142,12 @@ export const authOptions: NextAuthOptions = {
         const base = new URL(baseUrl);
         if (target.origin === base.origin) return candidate;
 
-        if (isAllowedRedirectHost(target.hostname)) return candidate;
+        if (isAllowedRedirectHost(target.hostname)) {
+          if (DEBUG) console.info("[AUTH redirect] allowed host:", target.hostname);
+          return candidate;
+        }
 
+        if (DEBUG) console.warn("[AUTH redirect] blocked host:", target.hostname, "→ fallback baseUrl");
         return baseUrl;
       } catch {
         return baseUrl;
