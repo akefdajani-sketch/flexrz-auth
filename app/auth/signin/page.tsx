@@ -17,8 +17,26 @@ function isAllowedHost(host: string) {
   );
 }
 
+
+function decodeMaybe(input: string): string {
+  let out = input;
+  // Decode up to 2 times to handle accidental double-encoding across redirects.
+  for (let i = 0; i < 2; i++) {
+    if (!/%[0-9A-Fa-f]{2}/.test(out)) break;
+    try {
+      const decoded = decodeURIComponent(out);
+      if (decoded === out) break;
+      out = decoded;
+    } catch {
+      break;
+    }
+  }
+  return out;
+}
+
 function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
-  const v = typeof raw === "string" ? raw : "";
+  const vRaw = typeof raw === "string" ? raw : "";
+  const v = decodeMaybe(vRaw);
   const from = typeof fromRaw === "string" ? fromRaw : "";
 
   // Default safe landing
