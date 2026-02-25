@@ -69,7 +69,9 @@ export default async function SignInPage({
   // If callbackUrl isn't provided (e.g. user navigated to /auth/signin directly from a deep link),
   // recover the originating URL from Referer so post-login returns to /book/... instead of '/'.
   if (!searchParams?.callbackUrl) {
-    const ref = headers().get("referer");
+    // Next 16: `headers()` is async.
+    const h = await headers();
+    const ref = h.get("referer");
     if (ref) {
       callbackUrl = sanitizeCallbackUrl(ref, searchParams?.from || ref);
     }
