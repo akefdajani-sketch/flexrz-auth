@@ -4,96 +4,27 @@ import { signIn } from "next-auth/react";
 
 export function SignInCard({ callbackUrl }: { callbackUrl: string }) {
   const onClick = async () => {
-    // IMPORTANT: Always bounce through the auth broker's /return route.
-    // This makes the post-login redirect deterministic and avoids cases where
-    // NextAuth normalizes or drops the path and sends users to app.flexrz.com/.
-    const to = encodeURIComponent(callbackUrl);
-    await signIn("google", { callbackUrl: `/return?to=${to}` });
+    // IMPORTANT: respect the callbackUrl passed in from /api/auth/signin.
+    // Do NOT force /return here — that breaks booking flows (flexrz.com/book/*)
+    // and causes unexpected redirects to app.flexrz.com.
+    await signIn("google", { callbackUrl });
   };
 
   return (
-    <div style={styles.wrap}>
-      <div style={styles.card}>
-        <div style={styles.kicker}>CUSTOMER SIGN IN</div>
-        <div style={styles.title}>Log in to manage your bookings</div>
-        <div style={styles.sub}>
-          Use your Google account to sign in. After that you’ll continue back
-          to the app.
-        </div>
-        <button type="button" onClick={onClick} style={styles.button}>
-          <span style={styles.googleDot} aria-hidden />
-          Continue with Google
-        </button>
-        <div style={styles.powered}>Powered by Flexrz</div>
+    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-black/40 p-6 shadow-xl backdrop-blur">
+      <div className="space-y-2">
+        <h1 className="text-xl font-semibold text-white">Sign in to Flexrz</h1>
+        <p className="text-sm text-white/70">
+          Continue with Google to access your dashboard and booking experiences.
+        </p>
       </div>
+
+      <button
+        onClick={onClick}
+        className="mt-6 w-full rounded-xl bg-white px-4 py-3 text-sm font-medium text-black hover:bg-white/90"
+      >
+        Continue with Google
+      </button>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  wrap: {
-    minHeight: "100vh",
-    display: "grid",
-    placeItems: "center",
-    background:
-      "radial-gradient(800px 400px at 50% 20%, rgba(60, 240, 160, 0.16), transparent 55%), #0b0f14",
-    padding: 24,
-  },
-  card: {
-    width: "100%",
-    maxWidth: 420,
-    borderRadius: 18,
-    padding: 24,
-    background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.10)",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
-    color: "#eaf2ff",
-    backdropFilter: "blur(10px)",
-  },
-  kicker: {
-    fontSize: 11,
-    letterSpacing: 0.9,
-    opacity: 0.72,
-    marginBottom: 10,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 700,
-    marginBottom: 8,
-  },
-  sub: {
-    fontSize: 13,
-    lineHeight: 1.5,
-    opacity: 0.8,
-    marginBottom: 18,
-  },
-  button: {
-    width: "100%",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    background: "#0f172a",
-    color: "#fff",
-    border: "1px solid rgba(255,255,255,0.12)",
-    borderRadius: 999,
-    padding: "12px 14px",
-    fontSize: 14,
-    fontWeight: 600,
-    cursor: "pointer",
-  },
-  googleDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 999,
-    background:
-      "conic-gradient(#4285F4 0 25%, #34A853 0 50%, #FBBC05 0 75%, #EA4335 0 100%)",
-    boxShadow: "0 0 0 2px rgba(255,255,255,0.06) inset",
-  },
-  powered: {
-    marginTop: 14,
-    fontSize: 12,
-    opacity: 0.6,
-    textAlign: "center",
-  },
-};

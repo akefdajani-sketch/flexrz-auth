@@ -5,36 +5,34 @@ import { SignInCard } from "./SignInCard";
 
 function sanitizeCallbackUrl(raw: unknown): string {
   const v = typeof raw === "string" ? raw : "";
-  if (!v) return "https://app.flexrz.com";
+  if (!v) return "https://flexrz.com";
 
-  // Accept relative paths (e.g. /tenant/<slug>) and attach them to app origin.
-  // This is important because app may pass a relative callbackUrl when sending
-  // users to central auth.
+  // Accept relative paths and treat them as relative to app.flexrz.com
+  // (mainly for tenant dashboard flows).
   if (v.startsWith("/")) {
     const base = process.env.NEXT_PUBLIC_APP_BASE_URL || "https://app.flexrz.com";
     try {
       return new URL(v, base).toString();
     } catch {
-      return "https://app.flexrz.com";
+      return "https://flexrz.com";
     }
   }
 
-  // Keep it simple: allow only app/owner/localhost, everything else falls back.
+  // Allow only Flexrz apex + subdomains (+ local dev). Everything else falls back.
   try {
     const u = new URL(v);
-    const host = u.host;
-    if (
-      host === "app.flexrz.com" ||
-      host === "owner.flexrz.com" ||
-      host.startsWith("localhost") ||
-      host.startsWith("127.0.0.1")
-    ) {
-      return v;
-    }
+    const host = u.hostname.toLowerCase();
+
+    const isFlexrz = host === "flexrz.com" || host === "www.flexrz.com" || host.endsWith(".flexrz.com");
+    const isLocal =
+      host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host === "127.0.0.1";
+
+    if (isFlexrz || isLocal) return v;
   } catch {
     // ignore
   }
-  return "https://app.flexrz.com";
+
+  return "https://flexrz.com";
 }
 
 export default async function SignInPage({
@@ -44,11 +42,10 @@ export default async function SignInPage({
 }) {
   const callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl);
 
-  // If already logged in, immediately return to the app.
+  // If already logged in, return directly to the requested callbackUrl.
   const session = await getServerSession(authOptions);
   if (session) {
-    const to = encodeURIComponent(callbackUrl);
-    redirect(`/return?to=${to}`);
+    redirect(callbackUrl);
   }
 
   return <SignInCard callbackUrl={callbackUrl} />;

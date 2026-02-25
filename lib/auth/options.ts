@@ -1,20 +1,14 @@
-
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
-// Function to refresh Google access token using stored refresh token
+// Refresh Google access token using stored refresh token
 async function refreshGoogleAccessToken(token: any) {
   const refreshToken = token?.google_refresh_token;
-  if (!refreshToken) {
-    return { ...token, error: "no_refresh_token" };
-  }
+  if (!refreshToken) return { ...token, error: "no_refresh_token" };
 
   const clientId = process.env.GOOGLE_CLIENT_ID || "";
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET || "";
-
-  if (!clientId || !clientSecret) {
-    return { ...token, error: "missing_google_client_env" };
-  }
+  if (!clientId || !clientSecret) return { ...token, error: "missing_google_client_env" };
 
   try {
     const body = new URLSearchParams({
@@ -50,6 +44,7 @@ async function refreshGoogleAccessToken(token: any) {
       ...token,
       google_access_token: newAccessToken || token.google_access_token,
       google_access_token_expires_at_ms: newExpiryMs || token.google_access_token_expires_at_ms,
+      // refresh_token usually not returned on refresh, but keep if it is.
       google_refresh_token: json?.refresh_token || token.google_refresh_token,
       google_id_token: json?.id_token || token.google_id_token,
       error: null,
@@ -59,6 +54,19 @@ async function refreshGoogleAccessToken(token: any) {
   }
 }
 
+function isAllowedRedirectHost(hostname: string) {
+  const host = (hostname || "").toLowerCase();
+  return (
+    host === "flexrz.com" ||
+    host === "www.flexrz.com" ||
+    host.endsWith(".flexrz.com") ||
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host === "127.0.0.1"
+  );
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
@@ -66,8 +74,9 @@ export const authOptions: NextAuthOptions = {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
       authorization: {
         params: {
-          access_type: "offline",  // Ensures Google returns refresh token
-          prompt: "consent",  // Forces Google to issue a refresh token
+          // Refresh tokens (offline) for long-lived sessions when needed.
+          access_type: "offline",
+          prompt: "consent",
         },
       },
     }),
@@ -82,11 +91,37 @@ export const authOptions: NextAuthOptions = {
   },
 
   jwt: {
-    maxAge: 30 * 24 * 60 * 60, // Align with session maxAge
+    maxAge: 30 * 24 * 60 * 60,
+  },
+
+  // Branded sign-in UI (MUST respect callbackUrl)
+  pages: {
+    signIn: "/auth/signin",
   },
 
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      try {
+        // Relative paths
+        if (url.startsWith("/")) return new URL(url, baseUrl).toString();
+
+        // Absolute URLs (allow only Flexrz domains + local dev)
+        const target = new URL(url);
+
+        // allow same-origin always
+        const base = new URL(baseUrl);
+        if (target.origin === base.origin) return url;
+
+        if (isAllowedRedirectHost(target.hostname)) return url;
+
+        return baseUrl;
+      } catch {
+        return baseUrl;
+      }
+    },
+
     async jwt({ token, account }) {
+      // On initial sign-in, persist Google tokens into the JWT
       if (account?.provider === "google") {
         const idToken = (account as any).id_token as string | undefined;
         const accessToken = (account as any).access_token as string | undefined;
@@ -102,9 +137,14 @@ export const authOptions: NextAuthOptions = {
               ? Date.now() + expiresInSec * 1000
               : undefined;
 
-        (token as any).google_id_token = idToken;
-        (token as any).google_access_token = accessToken;
-        (token as any).google_refresh_token = refreshToken || (token as any).google_refresh_token;
+        (token as any).google_id_token = idToken || (token as any).google_id_token || null;
+        (token as any).google_access_token =
+          accessToken || (token as any).google_access_token || null;
+
+        // Keep refresh token if Google doesn't send it again
+        (token as any).google_refresh_token =
+          refreshToken || (token as any).google_refresh_token || null;
+
         (token as any).google_access_token_expires_at_ms =
           expiryMs || (token as any).google_access_token_expires_at_ms;
 
@@ -112,23 +152,63 @@ export const authOptions: NextAuthOptions = {
         return token;
       }
 
+      // Refresh when close to expiry
       const expMs = (token as any).google_access_token_expires_at_ms as number | undefined;
-
       if (!expMs) return token;
 
       const shouldRefresh = Date.now() > expMs - 60_000;
       if (!shouldRefresh) return token;
 
-      const refreshed = await refreshGoogleAccessToken(token);
-      return refreshed;
+      return await refreshGoogleAccessToken(token);
     },
 
     async session({ session, token }) {
       (session as any).google_id_token = (token as any).google_id_token || null;
       (session as any).google_access_token = (token as any).google_access_token || null;
       (session as any).tokenError = (token as any).error || null;
-
       return session;
+    },
+  },
+
+  // Share session cookies across *.flexrz.com
+  cookies: {
+    sessionToken: {
+      name:
+        process.env.NODE_ENV === "production"
+          ? "__Secure-next-auth.session-token"
+          : "next-auth.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        domain: process.env.NODE_ENV === "production" ? ".flexrz.com" : undefined,
+      },
+    },
+    callbackUrl: {
+      name:
+        process.env.NODE_ENV === "production"
+          ? "__Secure-next-auth.callback-url"
+          : "next-auth.callback-url",
+      options: {
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        domain: process.env.NODE_ENV === "production" ? ".flexrz.com" : undefined,
+      },
+    },
+    csrfToken: {
+      name:
+        process.env.NODE_ENV === "production"
+          ? "__Host-next-auth.csrf-token"
+          : "next-auth.csrf-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+        // __Host- cookies must NOT set a Domain attribute.
+      },
     },
   },
 };
