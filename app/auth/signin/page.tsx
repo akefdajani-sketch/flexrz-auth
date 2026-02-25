@@ -23,38 +23,59 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
   // Default safe landing
   const fallback = "https://flexrz.com";
 
-  // Determine base origin for relative callbackUrls.
-  // Priority:
-  // 1) explicit "from" param (set by redirectToCentralGoogleAuth)
-  // 2) fallback to flexrz.com
-  let baseOrigin = fallback;
+  // Compute a safe default return URL (prefer full `from` incl. path)
+  let defaultReturn = fallback;
   if (from) {
-    const cleanedFrom = from.replace(/^https?:\/\//i, "").split("/")[0];
-    if (isAllowedHost(cleanedFrom)) {
-      baseOrigin = `https://${cleanedFrom}`;
+    try {
+      // `from` may already be a full URL like https://flexrz.com/book/birdie-golf
+      const u = new URL(from);
+      if (isAllowedHost(u.hostname)) {
+        defaultReturn = u.toString();
+      }
+    } catch {
+      // `from` might be just a hostname (legacy)
+      const cleanedHost = from.replace(/^https?:\/\//i, "").split("/")[0];
+      if (isAllowedHost(cleanedHost)) {
+        defaultReturn = `https://${cleanedHost}`;
+      }
     }
   }
 
-  if (!v) return baseOrigin;
+  // Determine base origin for resolving relative callbackUrls
+  let baseOrigin = fallback;
+  try {
+    baseOrigin = new URL(defaultReturn).origin;
+  } catch {
+    baseOrigin = fallback;
+  }
 
-  // Relative → resolve against the initiating origin (NOT always app.flexrz.com)
+  // If callbackUrl missing, return to where the flow started (not always /)
+  if (!v) return defaultReturn;
+
+  // Absolute callbackUrl: only allow our domains + localhost
+  try {
+    const u = new URL(v);
+    if (isAllowedHost(u.hostname)) return u.toString();
+    return defaultReturn;
+  } catch {
+    // Not absolute → handle relative forms below
+  }
+
+  // Relative callbackUrl (starts with /)
   if (v.startsWith("/")) {
     try {
       return new URL(v, baseOrigin).toString();
     } catch {
-      return baseOrigin;
+      return defaultReturn;
     }
   }
 
-  // Absolute → allow only flexrz.com + subdomains (+ local dev)
+  // Other relative (e.g. "book/birdie-golf" or "?x=y") → resolve against baseOrigin
   try {
-    const u = new URL(v);
-    if (isAllowedHost(u.hostname)) return v;
+    return new URL(v, baseOrigin + "/").toString();
   } catch {
-    // ignore
+    return defaultReturn;
   }
-
-  return baseOrigin;
 }
 
 export default async function SignInPage({
