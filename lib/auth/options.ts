@@ -101,18 +101,40 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async redirect({ url, baseUrl }) {
+      // NextAuth sometimes stores callbackUrl in an encoded form (e.g.
+      // "https%3A%2F%2Fflexrz.com%2Fbook%2Fbirdie-golf"). If we treat that
+      // as a raw URL, `new URL(url)` throws and we fall back to baseUrl,
+      // causing the user to land on "/".
+      //
+      // To prevent this, we attempt to decode 1–2 times before validating.
+      const decodeMaybe = (value: string) => {
+        let v = (value || "").trim();
+        for (let i = 0; i < 2; i++) {
+          try {
+            const dv = decodeURIComponent(v);
+            if (dv === v) break;
+            v = dv;
+          } catch {
+            break;
+          }
+        }
+        return v;
+      };
+
       try {
+        const candidate = decodeMaybe(url);
+
         // Relative paths
-        if (url.startsWith("/")) return new URL(url, baseUrl).toString();
+        if (candidate.startsWith("/")) return new URL(candidate, baseUrl).toString();
 
         // Absolute URLs (allow only Flexrz domains + local dev)
-        const target = new URL(url);
+        const target = new URL(candidate);
 
         // allow same-origin always
         const base = new URL(baseUrl);
-        if (target.origin === base.origin) return url;
+        if (target.origin === base.origin) return candidate;
 
-        if (isAllowedRedirectHost(target.hostname)) return url;
+        if (isAllowedRedirectHost(target.hostname)) return candidate;
 
         return baseUrl;
       } catch {
