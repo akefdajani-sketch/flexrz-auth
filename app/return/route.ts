@@ -1,11 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Hosts we will allow redirecting *to*.
-//
-// Security: prevents open redirects.
-// Keep this explicit and validated.
-const ALLOWED_HOST_SUFFIXES = [".flexrz.com"]; // app.flexrz.com, owner.flexrz.com, etc.
-
 function safeDecode(v: string) {
   try {
     return decodeURIComponent(v);
@@ -14,26 +8,66 @@ function safeDecode(v: string) {
   }
 }
 
-function isAllowedHost(hostname: string) {
-  const h = hostname.toLowerCase();
-  return ALLOWED_HOST_SUFFIXES.some((s) => h === s.slice(1) || h.endsWith(s));
+// Security: prevent open redirects.
+// Allow:
+//   - *.flexrz.com (and flexrz.com)
+//   - Any tenant custom domain registered as ACTIVE in the backend (tenant_domains)
+function isAllowedFlexrzHost(hostname: string) {
+  const h = (hostname || "").toLowerCase();
+  return h === "flexrz.com" || h === "www.flexrz.com" || h.endsWith(".flexrz.com");
 }
 
-function normalizeReturnUrl(req: NextRequest, rawTo: string | null) {
+function getBackendBase(): string {
+  return (
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    ""
+  ).trim();
+}
+
+async function isRegisteredTenantDomain(hostname: string): Promise<boolean> {
+  const backend = getBackendBase();
+  if (!backend) return false;
+  try {
+    const u = new URL("/api/tenant-domains/_public/resolve", backend);
+    u.searchParams.set("domain", hostname);
+    const res = await fetch(u.toString(), { next: { revalidate: 60 } });
+    if (!res.ok) return false;
+    const json = (await res.json()) as any;
+    const slug = (json?.tenantSlug || json?.slug || "").toString().trim();
+    return !!slug;
+  } catch {
+    return false;
+  }
+}
+
+async function normalizeReturnUrl(req: NextRequest, rawTo: string | null) {
   const to = (rawTo || "").trim();
   if (!to) return null;
 
   // Support both absolute URLs and relative paths.
-  // Relative paths will be treated as relative to app.flexrz.com by default.
+  // Relative paths will be treated as relative to:
+  //   - ?from=<host> if provided AND allowed, else
+  //   - app.flexrz.com by default.
   if (to.startsWith("/")) {
-    const appHost = process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com";
-    return new URL(`https://${appHost}${to}`);
+    const from = (req.nextUrl.searchParams.get("from") || "").trim().toLowerCase();
+    const appHost = (process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com").toLowerCase();
+
+    const baseHost =
+      from && (isAllowedFlexrzHost(from) || (await isRegisteredTenantDomain(from)))
+        ? from
+        : appHost;
+
+    return new URL(`https://${baseHost}${to}`);
   }
 
   try {
     const u = new URL(to);
-    if (!isAllowedHost(u.hostname)) return null;
     if (u.protocol !== "https:") return null;
+    const host = u.hostname.toLowerCase();
+    const allowed = isAllowedFlexrzHost(host) || (await isRegisteredTenantDomain(host));
+    if (!allowed) return null;
     return u;
   } catch {
     return null;
@@ -47,7 +81,7 @@ export async function GET(req: NextRequest) {
 
   const appHost = (process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com").toLowerCase();
   const fallback = new URL("https://flexrz.com");
-  const target = normalizeReturnUrl(req, rawTo) ?? fallback;
+  const target = (await normalizeReturnUrl(req, rawTo)) ?? fallback;
 
   // If the caller only provided the app *root* (or /tenant), we can still
   // land them on the correct tenant by using the cookie set by app.flexrz.com.
