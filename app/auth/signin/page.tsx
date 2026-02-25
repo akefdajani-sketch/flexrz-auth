@@ -17,38 +17,16 @@ function isAllowedHost(host: string) {
   );
 }
 
-function safeDecode(v: string) {
-  if (!v) return "";
-  // Decode up to 2 times, but never throw.
-  // Handles cases where callbackUrl is double-encoded through multiple redirect hops.
-  let out = v;
-  for (let i = 0; i < 2; i++) {
-    try {
-      const dec = decodeURIComponent(out);
-      if (dec === out) break;
-      out = dec;
-    } catch {
-      break;
-    }
-  }
-  return out;
-}
-
 function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
-  // Next.js searchParams values are not guaranteed to be decoded.
-  // In practice, callbackUrl often arrives as an encoded absolute URL
-  // (e.g. https%3A%2F%2Fflexrz.com%2Fbook%2Fbirdie-golf). If we don't decode it,
-  // new URL(v) throws and we fall back to the base origin, causing the
-  // post-login redirect to land on https://flexrz.com instead of /book/<slug>.
-  const v = safeDecode(typeof raw === "string" ? raw : "");
-  const from = safeDecode(typeof fromRaw === "string" ? fromRaw : "");
+  const v = typeof raw === "string" ? raw : "";
+  const from = typeof fromRaw === "string" ? fromRaw : "";
 
   // Default safe landing
   const fallback = "https://flexrz.com";
 
   // Determine base origin for relative callbackUrls.
   // Priority:
-  // 1) explicit "from" param (set by booking-frontend)
+  // 1) explicit "from" param (set by redirectToCentralGoogleAuth)
   // 2) fallback to flexrz.com
   let baseOrigin = fallback;
   if (from) {
@@ -60,7 +38,7 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
 
   if (!v) return baseOrigin;
 
-  // Relative → resolve against the initiating origin
+  // Relative → resolve against the initiating origin (NOT always app.flexrz.com)
   if (v.startsWith("/")) {
     try {
       return new URL(v, baseOrigin).toString();
@@ -91,7 +69,9 @@ export default async function SignInPage({
   // If callbackUrl isn't provided (e.g. user navigated to /auth/signin directly from a deep link),
   // recover the originating URL from Referer so post-login returns to /book/... instead of '/'.
   if (!searchParams?.callbackUrl) {
-    const ref = headers().get("referer");
+    // In Next.js 16/Turbopack, `headers()` is typed as async.
+    // `await` is safe even if it's sync in other environments.
+    const ref = (await headers()).get("referer");
     if (ref) {
       callbackUrl = sanitizeCallbackUrl(ref, searchParams?.from || ref);
     }
