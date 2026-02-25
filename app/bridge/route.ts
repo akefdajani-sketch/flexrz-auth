@@ -64,7 +64,21 @@ function pickGoogleToken(decoded: any): string | null {
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const rawReturnTo = safeDecode(url.searchParams.get("returnTo") || "");
+  // Prefer explicit returnTo, but also support other common param/cookie names.
+  const sp = url.searchParams;
+  const cookieCallbackUrl =
+    req.cookies.get("__Secure-next-auth.callback-url")?.value ||
+    req.cookies.get("next-auth.callback-url")?.value ||
+    "";
+
+  const rawReturnTo = safeDecode(
+    sp.get("returnTo") ||
+      sp.get("return") ||
+      sp.get("to") ||
+      sp.get("callbackUrl") ||
+      cookieCallbackUrl ||
+      ""
+  );
 
   let returnTo: URL | null = null;
   try {
