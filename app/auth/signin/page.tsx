@@ -40,13 +40,25 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
   const from = typeof fromRaw === "string" ? fromRaw : "";
 
   // Default safe landing
-  const fallback = "https://flexrz.com";
+  const fallback = (process.env.NEXT_PUBLIC_APP_BASE_URL || "https://app.flexrz.com").replace(/\/$/, "");
 
   // Determine base origin for relative callbackUrls.
   // Priority:
   // 1) explicit "from" param (set by redirectToCentralGoogleAuth)
   // 2) fallback to flexrz.com
   let baseOrigin = fallback;
+  // If caller didn't provide `from`, try to infer it from the Referer host.
+  if (!from) {
+    try {
+      const ref = (await headers()).get("referer") || "";
+      if (ref) {
+        const refUrl = new URL(ref);
+        if (isAllowedHost(refUrl.hostname)) {
+          baseOrigin = `${refUrl.origin}`;
+        }
+      }
+    } catch {}
+  }
   if (from) {
     const cleanedFrom = from.replace(/^https?:\/\//i, "").split("/")[0];
     if (isAllowedHost(cleanedFrom)) {
@@ -82,24 +94,15 @@ export default async function SignInPage({
   searchParams?: { callbackUrl?: string; from?: string; error?: string };
 }) {
   // Primary: use callbackUrl/from query params.
-  // IMPORTANT: callbackUrl may arrive as a RELATIVE path (e.g. "/tenant/birdie-golf")
-  // when the initiating app used a relative callback and did not include `from`.
-  // In that case, we must anchor the relative URL to the *initiating* host (Referer),
-  // not to the marketing root (flexrz.com).
+  let callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl, searchParams?.from);
   let refForDebug: string | null = null;
-  const rawCb = searchParams?.callbackUrl || "";
-  const needsRefererAnchor = rawCb.startsWith("/") && !searchParams?.from;
-  if (needsRefererAnchor) {
-    refForDebug = (await headers()).get("referer");
-  }
-  let callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl, searchParams?.from || refForDebug);
 
   // If callbackUrl isn't provided (e.g. user navigated to /auth/signin directly from a deep link),
   // recover the originating URL from Referer so post-login returns to /book/... instead of '/'.
   if (!searchParams?.callbackUrl) {
     // In Next.js 16/Turbopack, `headers()` is typed as async.
     // `await` is safe even if it's sync in other environments.
-    refForDebug = refForDebug || (await headers()).get("referer");
+    refForDebug = (await headers()).get("referer");
     const ref = refForDebug;
     if (ref) {
       callbackUrl = sanitizeCallbackUrl(ref, searchParams?.from || ref);
