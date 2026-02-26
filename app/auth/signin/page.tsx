@@ -17,7 +17,6 @@ function isAllowedHost(host: string) {
   );
 }
 
-
 function decodeMaybe(input: string): string {
   let out = input;
   // Decode up to 2 times to handle accidental double-encoding across redirects.
@@ -40,25 +39,13 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
   const from = typeof fromRaw === "string" ? fromRaw : "";
 
   // Default safe landing
-  const fallback = (process.env.NEXT_PUBLIC_APP_BASE_URL || "https://app.flexrz.com").replace(/\/$/, "");
+  const fallback = "https://flexrz.com";
 
   // Determine base origin for relative callbackUrls.
   // Priority:
   // 1) explicit "from" param (set by redirectToCentralGoogleAuth)
   // 2) fallback to flexrz.com
   let baseOrigin = fallback;
-  // If caller didn't provide `from`, try to infer it from the Referer host.
-  if (!from) {
-    try {
-      const ref = hdrs.get("referer") || "";
-      if (ref) {
-        const refUrl = new URL(ref);
-        if (isAllowedHost(refUrl.hostname)) {
-          baseOrigin = `${refUrl.origin}`;
-        }
-      }
-    } catch {}
-  }
   if (from) {
     const cleanedFrom = from.replace(/^https?:\/\//i, "").split("/")[0];
     if (isAllowedHost(cleanedFrom)) {
@@ -89,11 +76,14 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
 }
 
 export default async function SignInPage({
-  const hdrs = await headers();
   searchParams,
 }: {
-  searchParams?: { callbackUrl?: string; from?: string; error?: string };
+  searchParams?: { callbackUrl?: string; from?: string };
 }) {
+  // IMPORTANT: Next.js 16 types `headers()` as async in some builds.
+  // Call it once in the function body to avoid parser issues and reuse it.
+  const hdrs = await headers();
+
   // Primary: use callbackUrl/from query params.
   let callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl, searchParams?.from);
   let refForDebug: string | null = null;
@@ -101,8 +91,6 @@ export default async function SignInPage({
   // If callbackUrl isn't provided (e.g. user navigated to /auth/signin directly from a deep link),
   // recover the originating URL from Referer so post-login returns to /book/... instead of '/'.
   if (!searchParams?.callbackUrl) {
-    // In Next.js 16/Turbopack, `headers()` is typed as async.
-    // `await` is safe even if it's sync in other environments.
     refForDebug = hdrs.get("referer");
     const ref = refForDebug;
     if (ref) {
@@ -123,5 +111,5 @@ export default async function SignInPage({
     redirect(callbackUrl);
   }
 
-  return <SignInCard callbackUrl={callbackUrl} error={searchParams?.error || null} />;
+  return <SignInCard callbackUrl={callbackUrl} />;
 }
