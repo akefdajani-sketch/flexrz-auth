@@ -50,7 +50,7 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
   // If caller didn't provide `from`, try to infer it from the Referer host.
   if (!from) {
     try {
-      const ref = (await headers()).get("referer") || "";
+      const ref = headers().get("referer") || "";
       if (ref) {
         const refUrl = new URL(ref);
         if (isAllowedHost(refUrl.hostname)) {
@@ -102,7 +102,7 @@ export default async function SignInPage({
   if (!searchParams?.callbackUrl) {
     // In Next.js 16/Turbopack, `headers()` is typed as async.
     // `await` is safe even if it's sync in other environments.
-    refForDebug = (await headers()).get("referer");
+    refForDebug = headers().get("referer");
     const ref = refForDebug;
     if (ref) {
       callbackUrl = sanitizeCallbackUrl(ref, searchParams?.from || ref);
