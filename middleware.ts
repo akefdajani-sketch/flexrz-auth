@@ -56,10 +56,12 @@ export function middleware(req: NextRequest) {
     return res;
   }
 
-  // Only target the custom auth signin page.
-  if (pathname !== "/auth/signin") {
-    return NextResponse.next();
-  }
+  // Target both the custom auth signin page and NextAuth's built-in /api/auth/signin.
+  // Some entry points may still hit /api/auth/signin directly (e.g. legacy links or
+  // NextAuth default helpers). If we don't overwrite callback cookies there too,
+  // a stale callbackUrl can win and send users to the wrong place (often flexrz.com).
+  const isSigninRoute = pathname === "/auth/signin" || pathname === "/api/auth/signin";
+  if (!isSigninRoute) return NextResponse.next();
 
   const rawReturnTo = searchParams.get("returnTo") || searchParams.get("callbackUrl");
   if (!rawReturnTo) {
