@@ -3,31 +3,6 @@
 import Image from "next/image";
 import { signIn } from "next-auth/react";
 
-function setCallbackUrlCookie(callbackUrl: string) {
-  // NextAuth uses a callback-url cookie to decide where to redirect after OAuth.
-  // In our multi-subdomain setup, a stale cookie (often set to https://flexrz.com/)
-  // can override the desired deep link returnTo (e.g. /book/:slug).
-  //
-  // The cookie is intentionally NOT httpOnly (see authOptions.cookies.callbackUrl),
-  // so we can safely overwrite it here before starting the OAuth flow.
-  try {
-    const isProd = typeof window !== "undefined" && window.location.protocol === "https:";
-    const name = isProd ? "__Secure-next-auth.callback-url" : "next-auth.callback-url";
-    const encoded = encodeURIComponent(callbackUrl);
-
-    // Use Domain=.flexrz.com in production so auth.flexrz.com can set a cookie
-    // that applies to flexrz.com (and all subdomains).
-    const parts: string[] = [`${name}=${encoded}`, "Path=/", "SameSite=Lax"];
-    if (isProd) {
-      parts.push("Secure");
-      parts.push("Domain=.flexrz.com");
-    }
-    document.cookie = parts.join("; ");
-  } catch {
-    // ignore
-  }
-}
-
 function GoogleMark() {
   return (
     <svg aria-hidden="true" viewBox="0 0 48 48" className="h-5 w-5">
@@ -59,9 +34,20 @@ export function SignInCard({
   error?: string | null;
 }) {
   const onClick = async () => {
-    // Hard-set callback-url cookie to prevent stale values (often '/') from
-    // overriding our intended deep link return target.
-    setCallbackUrlCookie(callbackUrl);
+    // Hardening: overwrite the NextAuth callback-url cookie so stale values (e.g. "/")
+    // can't hijack the post-login redirect.
+    // We set it server-side on auth.flexrz.com with Domain=.flexrz.com so it applies to flexrz.com.
+    try {
+      await fetch(`/api/auth/set-callback?callbackUrl=${encodeURIComponent(callbackUrl)}`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    } catch {
+      // If this fails, we still attempt sign-in (better than blocking), but redirects may fall back to "/".
+    }
 
     // ✅ Use NextAuth client helper so CSRF + state cookies are created correctly.
     // This prevents the immediate bounce back to /auth/signin?error=google.
