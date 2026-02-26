@@ -114,6 +114,12 @@ export const authOptions: NextAuthOptions = {
           // Refresh tokens (offline) for long-lived sessions when needed.
           access_type: "offline",
           prompt: "consent",
+          // Defensive: ensure the authorize request includes the required
+          // OAuth param. NextAuth normally sets this, but we explicitly
+          // include it to avoid malformed authorize URLs in edge cases.
+          response_type: "code",
+          // Explicit scopes (Google accepts space-delimited).
+          scope: "openid email profile",
         },
       },
     }),
