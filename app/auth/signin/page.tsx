@@ -34,55 +34,9 @@ function decodeMaybe(input: string): string {
   return out;
 }
 
-
-function stripNestedCallbackUrl(input: string): string {
-  // If callbackUrl accidentally points back to auth signin with another callbackUrl inside,
-  // unwrap it to the innermost intended destination.
-  // Example:
-  //   https://auth.flexrz.com/auth/signin?callbackUrl=https%3A%2F%2Fflexrz.com%2Fbook%2Fbirdie-golf
-  // → https://flexrz.com/book/birdie-golf
-  let out = input;
-  for (let i = 0; i < 3; i++) {
-    try {
-      const u = new URL(out);
-      if (!u.searchParams.has("callbackUrl")) break;
-      const inner = u.searchParams.get("callbackUrl") || "";
-      if (!inner) break;
-      // decode inner (may be encoded)
-      let decoded = inner;
-      for (let j = 0; j < 2; j++) {
-        try {
-          const d2 = decodeURIComponent(decoded);
-          if (d2 === decoded) break;
-          decoded = d2;
-        } catch {
-          break;
-        }
-      }
-      out = decoded;
-    } catch {
-      break;
-    }
-  }
-  return out;
-}
-
-function isAuthDomainUrl(v: string): boolean {
-  try {
-    const u = new URL(v);
-    return u.hostname === "auth.flexrz.com" && u.pathname.startsWith("/auth/");
-  } catch {
-    return false;
-  }
-}
-
-
 function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
   const vRaw = typeof raw === "string" ? raw : "";
-  let v = decodeMaybe(vRaw);
-  v = stripNestedCallbackUrl(v);
-  // Hard-block returning to auth.flexrz.com/auth/* to prevent callback loops.
-  if (isAuthDomainUrl(v)) v = "";
+  const v = decodeMaybe(vRaw);
   const from = typeof fromRaw === "string" ? fromRaw : "";
 
   // Default safe landing
