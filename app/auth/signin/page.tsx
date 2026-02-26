@@ -82,29 +82,27 @@ export default async function SignInPage({
   searchParams?: { callbackUrl?: string; from?: string; error?: string };
 }) {
   // Primary: use callbackUrl/from query params.
-  let callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl, searchParams?.from);
+  // IMPORTANT: callbackUrl may arrive as a RELATIVE path (e.g. "/tenant/birdie-golf")
+  // when the initiating app used a relative callback and did not include `from`.
+  // In that case, we must anchor the relative URL to the *initiating* host (Referer),
+  // not to the marketing root (flexrz.com).
   let refForDebug: string | null = null;
+  const rawCb = searchParams?.callbackUrl || "";
+  const needsRefererAnchor = rawCb.startsWith("/") && !searchParams?.from;
+  if (needsRefererAnchor) {
+    refForDebug = (await headers()).get("referer");
+  }
+  let callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl, searchParams?.from || refForDebug);
 
   // If callbackUrl isn't provided (e.g. user navigated to /auth/signin directly from a deep link),
   // recover the originating URL from Referer so post-login returns to /book/... instead of '/'.
   if (!searchParams?.callbackUrl) {
     // In Next.js 16/Turbopack, `headers()` is typed as async.
     // `await` is safe even if it's sync in other environments.
-    refForDebug = (await headers()).get("referer");
+    refForDebug = refForDebug || (await headers()).get("referer");
     const ref = refForDebug;
     if (ref) {
       callbackUrl = sanitizeCallbackUrl(ref, searchParams?.from || ref);
-    }
-  }
-
-  // If callbackUrl IS provided but is relative (e.g. "/tenant/...") and the caller forgot to pass
-  // a "from" param, fall back to the Referer host as the base origin. This prevents redirecting to
-  // https://flexrz.com/<path> when the initiating app was https://app.flexrz.com.
-  if (searchParams?.callbackUrl && searchParams.callbackUrl.startsWith("/") && !searchParams?.from) {
-    const ref = (await headers()).get("referer");
-    if (ref) {
-      refForDebug = refForDebug || ref;
-      callbackUrl = sanitizeCallbackUrl(searchParams.callbackUrl, ref);
     }
   }
 
