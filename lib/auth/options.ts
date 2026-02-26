@@ -67,6 +67,43 @@ function isAllowedRedirectHost(hostname: string) {
   );
 }
 
+
+function stripNestedCallbackUrl(input: string): string {
+  let out = input;
+  for (let i = 0; i < 3; i++) {
+    try {
+      const u = new URL(out);
+      if (!u.searchParams.has("callbackUrl")) break;
+      const inner = u.searchParams.get("callbackUrl") || "";
+      if (!inner) break;
+      let decoded = inner;
+      for (let j = 0; j < 2; j++) {
+        try {
+          const d2 = decodeURIComponent(decoded);
+          if (d2 === decoded) break;
+          decoded = d2;
+        } catch {
+          break;
+        }
+      }
+      out = decoded;
+    } catch {
+      break;
+    }
+  }
+  return out;
+}
+
+function isBlockedAuthCallback(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname === "auth.flexrz.com" && u.pathname.startsWith("/auth/");
+  } catch {
+    return false;
+  }
+}
+
+
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
@@ -125,7 +162,12 @@ export const authOptions: NextAuthOptions = {
       };
 
       try {
-        const candidate = decodeMaybe(url);
+        let candidate = decodeMaybe(url);
+        candidate = stripNestedCallbackUrl(candidate);
+        if (isBlockedAuthCallback(candidate)) {
+          // Never allow returning to auth domain pages; fallback to baseUrl.
+          return baseUrl;
+        }
         if (DEBUG) {
           console.info("[AUTH redirect] raw url=", url);
           console.info("[AUTH redirect] decoded candidate=", candidate);
