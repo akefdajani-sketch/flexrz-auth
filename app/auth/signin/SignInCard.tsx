@@ -30,7 +30,13 @@ function GoogleMark() {
   );
 }
 
-export function SignInCard({ callbackUrl }: { callbackUrl: string }) {
+export function SignInCard({
+  callbackUrl,
+  error,
+}: {
+  callbackUrl: string;
+  error?: string;
+}) {
   const onClick = async () => {
     // IMPORTANT: We must preserve the *full* callbackUrl (including /book/<slug>).
     // In some environments, next-auth/react `signIn()` can end up collapsing the
@@ -49,6 +55,16 @@ export function SignInCard({ callbackUrl }: { callbackUrl: string }) {
           Continue with Google to access your dashboard and booking experiences.
         </p>
       </div>
+
+      {error ? (
+        <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div className="font-medium">Sign-in error</div>
+          <div className="mt-1 break-all opacity-90">{error}</div>
+          <div className="mt-2 text-xs opacity-80">
+            Check Vercel logs for <span className="font-mono">[NextAuth error]</span>.
+          </div>
+        </div>
+      ) : null}
 
       <button
         onClick={onClick}

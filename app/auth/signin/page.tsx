@@ -79,7 +79,7 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams?: { callbackUrl?: string; from?: string };
+  searchParams?: { callbackUrl?: string; from?: string; error?: string };
 }) {
   // Primary: use callbackUrl/from query params.
   let callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl, searchParams?.from);
@@ -110,5 +110,5 @@ export default async function SignInPage({
     redirect(callbackUrl);
   }
 
-  return <SignInCard callbackUrl={callbackUrl} />;
+  return <SignInCard callbackUrl={callbackUrl} error={searchParams?.error} />;
 }
