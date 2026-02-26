@@ -97,6 +97,17 @@ export default async function SignInPage({
     }
   }
 
+  // If callbackUrl IS provided but is relative (e.g. "/tenant/...") and the caller forgot to pass
+  // a "from" param, fall back to the Referer host as the base origin. This prevents redirecting to
+  // https://flexrz.com/<path> when the initiating app was https://app.flexrz.com.
+  if (searchParams?.callbackUrl && searchParams.callbackUrl.startsWith("/") && !searchParams?.from) {
+    const ref = (await headers()).get("referer");
+    if (ref) {
+      refForDebug = refForDebug || ref;
+      callbackUrl = sanitizeCallbackUrl(searchParams.callbackUrl, ref);
+    }
+  }
+
   const DEBUG_SIGNIN = process.env.AUTH_DEBUG_SIGNIN === "1";
   if (DEBUG_SIGNIN) {
     console.info("[AUTH signin] raw search callbackUrl=", searchParams?.callbackUrl || "");
