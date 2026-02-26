@@ -2,7 +2,6 @@
 "use client";
 
 import Image from "next/image";
-import { signIn } from "next-auth/react";
 
 function GoogleMark() {
   return (
@@ -33,9 +32,13 @@ function GoogleMark() {
 
 export function SignInCard({ callbackUrl }: { callbackUrl: string }) {
   const onClick = async () => {
-    // IMPORTANT: respect the callbackUrl passed in from /auth/signin.
-    // Do NOT force /return here — that breaks booking flows (flexrz.com/book/*).
-    await signIn("google", { callbackUrl });
+    // IMPORTANT: We must preserve the *full* callbackUrl (including /book/<slug>).
+    // In some environments, next-auth/react `signIn()` can end up collapsing the
+    // callbackUrl to origin-only. To eliminate that risk, navigate directly to
+    // the NextAuth signin route with an explicit callbackUrl query param.
+    const params = new URLSearchParams();
+    params.set("callbackUrl", callbackUrl);
+    window.location.assign(`/api/auth/signin/google?${params.toString()}`);
   };
 
   return (
