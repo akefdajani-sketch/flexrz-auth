@@ -78,19 +78,21 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams?: { callbackUrl?: string; from?: string };
+  searchParams?: { callbackUrl?: string; returnTo?: string; from?: string };
 }) {
   // IMPORTANT: Next.js 16 types `headers()` as async in some builds.
   // Call it once in the function body to avoid parser issues and reuse it.
   const hdrs = await headers();
 
-  // Primary: use callbackUrl/from query params.
-  let callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl, searchParams?.from);
+  // Primary: prefer explicit returnTo (set by booking app), then callbackUrl.
+  // This avoids stale callback-url cookies forcing redirects to '/'.
+  const preferred = searchParams?.returnTo || searchParams?.callbackUrl;
+  let callbackUrl = sanitizeCallbackUrl(preferred, searchParams?.from);
   let refForDebug: string | null = null;
 
   // If callbackUrl isn't provided (e.g. user navigated to /auth/signin directly from a deep link),
   // recover the originating URL from Referer so post-login returns to /book/... instead of '/'.
-  if (!searchParams?.callbackUrl) {
+  if (!preferred) {
     refForDebug = hdrs.get("referer");
     const ref = refForDebug;
     if (ref) {
@@ -101,6 +103,7 @@ export default async function SignInPage({
   const DEBUG_SIGNIN = process.env.AUTH_DEBUG_SIGNIN === "1";
   if (DEBUG_SIGNIN) {
     console.info("[AUTH signin] raw search callbackUrl=", searchParams?.callbackUrl || "");
+    console.info("[AUTH signin] raw search returnTo=", searchParams?.returnTo || "");
     console.info("[AUTH signin] raw search from=", searchParams?.from || "");
     console.info("[AUTH signin] referer=", refForDebug || "");
     console.info("[AUTH signin] computed callbackUrl=", callbackUrl);
