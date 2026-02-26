@@ -285,9 +285,15 @@ export const authOptions: NextAuthOptions = {
   },
 
   events: {
-    async error(message) {
-      // Fires for OAuth callback failures (PKCE/state/CSRF/token exchange/etc).
-      console.error("[NextAuth event:error]", message);
+    async signIn(message) {
+      console.log("[NextAuth event:signIn]", message?.user?.email || message?.user?.name || message);
+    },
+    async signOut(message) {
+      console.log("[NextAuth event:signOut]", message);
+    },
+    async session(message) {
+      // Fires when a session is checked/created. Helpful for debugging cookie issues.
+      console.log("[NextAuth event:session]", message?.session?.user?.email || message);
     },
   },
 
