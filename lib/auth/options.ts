@@ -127,37 +127,6 @@ export const authOptions: NextAuthOptions = {
 
   secret: process.env.NEXTAUTH_SECRET,
 
-  // Turn on verbose NextAuth logging when requested.
-  debug:
-    process.env.NEXTAUTH_DEBUG === "true" ||
-    process.env.NEXTAUTH_DEBUG === "1" ||
-    process.env.AUTH_DEBUG_SIGNIN === "1" ||
-    process.env.AUTH_DEBUG_REDIRECT === "1",
-
-  // Ensure NextAuth errors land on a real page we control.
-  pages: {
-    signIn: "/auth/signin",
-    error: "/auth/error",
-  },
-
-  // Force NextAuth to print errors/warnings to Vercel logs.
-  logger: {
-    error(code, metadata) {
-      console.error("[NextAuth error]", code, metadata ?? "");
-    },
-    warn(code) {
-      console.warn("[NextAuth warn]", code);
-    },
-    debug(code, metadata) {
-      // NextAuth calls this frequently; keep it behind debug flags.
-      const DEBUG =
-        process.env.NEXTAUTH_DEBUG === "true" ||
-        process.env.NEXTAUTH_DEBUG === "1" ||
-        process.env.AUTH_DEBUG_SIGNIN === "1";
-      if (DEBUG) console.info("[NextAuth debug]", code, metadata ?? "");
-    },
-  },
-
   session: {
     strategy: "jwt",
     maxAge: 30 * 24 * 60 * 60, // 30 days
@@ -169,6 +138,29 @@ export const authOptions: NextAuthOptions = {
   },
 
   // Branded sign-in UI (MUST respect callbackUrl)
+  pages: {
+    signIn: "/auth/signin",
+    error: "/auth/error",
+  },
+
+  // Emit useful errors in Vercel logs. Without this, many OAuth callback
+  // failures degrade to "error=google" on the sign-in page with no details.
+  logger: {
+    error(code, metadata) {
+      console.error("[NextAuth error]", code, metadata);
+    },
+    warn(code) {
+      console.warn("[NextAuth warn]", code);
+    },
+    debug(code, metadata) {
+      // Only log debug when explicitly enabled.
+      if (process.env.NEXTAUTH_DEBUG === "true") {
+        console.debug("[NextAuth debug]", code, metadata);
+      }
+    },
+  },
+
+  debug: process.env.NEXTAUTH_DEBUG === "true",
 
   callbacks: {
     async redirect({ url, baseUrl }) {

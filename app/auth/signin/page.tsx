@@ -110,5 +110,5 @@ export default async function SignInPage({
     redirect(callbackUrl);
   }
 
-  return <SignInCard callbackUrl={callbackUrl} error={searchParams?.error} />;
+  return <SignInCard callbackUrl={callbackUrl} error={searchParams?.error || null} />;
 }
