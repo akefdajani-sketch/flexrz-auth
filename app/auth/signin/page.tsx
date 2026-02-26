@@ -83,16 +83,26 @@ export default async function SignInPage({
 }) {
   // Primary: use callbackUrl/from query params.
   let callbackUrl = sanitizeCallbackUrl(searchParams?.callbackUrl, searchParams?.from);
+  let refForDebug: string | null = null;
 
   // If callbackUrl isn't provided (e.g. user navigated to /auth/signin directly from a deep link),
   // recover the originating URL from Referer so post-login returns to /book/... instead of '/'.
   if (!searchParams?.callbackUrl) {
     // In Next.js 16/Turbopack, `headers()` is typed as async.
     // `await` is safe even if it's sync in other environments.
-    const ref = (await headers()).get("referer");
+    refForDebug = (await headers()).get("referer");
+    const ref = refForDebug;
     if (ref) {
       callbackUrl = sanitizeCallbackUrl(ref, searchParams?.from || ref);
     }
+  }
+
+  const DEBUG_SIGNIN = process.env.AUTH_DEBUG_SIGNIN === "1";
+  if (DEBUG_SIGNIN) {
+    console.info("[AUTH signin] raw search callbackUrl=", searchParams?.callbackUrl || "");
+    console.info("[AUTH signin] raw search from=", searchParams?.from || "");
+    console.info("[AUTH signin] referer=", refForDebug || "");
+    console.info("[AUTH signin] computed callbackUrl=", callbackUrl);
   }
 
   const session = await getServerSession(authOptions);
