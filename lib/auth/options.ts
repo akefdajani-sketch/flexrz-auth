@@ -163,6 +163,18 @@ export const authOptions: NextAuthOptions = {
   debug: process.env.NEXTAUTH_DEBUG === "true",
 
   callbacks: {
+    async signIn({ user, account, profile, email, credentials }) {
+      // Capture provider-level sign-in failures that otherwise only surface as `error=google`.
+      const DEBUG = process.env.AUTH_DEBUG_SIGNIN === "1" || process.env.NEXTAUTH_DEBUG === "true";
+      if (DEBUG) {
+        try {
+          console.info("[AUTH signIn] provider=", account?.provider);
+          console.info("[AUTH signIn] account keys=", account ? Object.keys(account as any) : null);
+          console.info("[AUTH signIn] profile keys=", profile ? Object.keys(profile as any) : null);
+        } catch {}
+      }
+      return true;
+    },
     async redirect({ url, baseUrl }) {
       const DEBUG = process.env.AUTH_DEBUG_REDIRECT === "1";
       // NextAuth sometimes stores callbackUrl in an encoded form (e.g.
@@ -269,6 +281,13 @@ export const authOptions: NextAuthOptions = {
       (session as any).google_access_token = (token as any).google_access_token || null;
       (session as any).tokenError = (token as any).error || null;
       return session;
+    },
+  },
+
+  events: {
+    async error(message) {
+      // Fires for OAuth callback failures (PKCE/state/CSRF/token exchange/etc).
+      console.error("[NextAuth event:error]", message);
     },
   },
 
