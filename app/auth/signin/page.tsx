@@ -114,5 +114,17 @@ export default async function SignInPage({
     redirect(callbackUrl);
   }
 
-  return <SignInCard callbackUrl={callbackUrl} />;
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <SignInCard callbackUrl={callbackUrl} />
+    </main>
+  );
 }

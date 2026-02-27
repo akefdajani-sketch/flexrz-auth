@@ -3,24 +3,32 @@
 import Image from "next/image";
 import { signIn } from "next-auth/react";
 
-function GoogleMark() {
+function GoogleSmallMark() {
+  // Small multicolor Google mark (not the big default page)
   return (
-    <svg aria-hidden="true" viewBox="0 0 48 48" className="h-5 w-5">
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 50 50"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="Google"
+    >
       <path
-        fill="#EA4335"
-        d="M24 9.5c3.54 0 6.72 1.22 9.23 3.62l6.87-6.87C35.9 2.44 30.4 0 24 0 14.62 0 6.51 5.38 2.56 13.22l8 6.22C12.47 13.3 17.79 9.5 24 9.5z"
+        fill="#FFC107"
+        d="M43.611 20.083H42V20H24v8h11.303C33.708 32.656 29.233 36 24 36c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.047 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
       />
       <path
-        fill="#4285F4"
-        d="M46.98 24.55c0-1.57-.14-3.09-.4-4.55H24v9.02h12.95c-.58 2.9-2.21 5.36-4.69 7.02l7.26 5.63c4.26-3.93 6.46-9.72 6.46-17.14z"
+        fill="#FF3D00"
+        d="M6.306 14.691l6.571 4.819C14.655 16.108 19.01 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.047 6.053 29.268 4 24 4c-7.682 0-14.334 4.337-17.694 10.691z"
       />
       <path
-        fill="#FBBC05"
-        d="M10.56 28.44c-.48-1.45-.76-2.99-.76-4.44s.27-2.99.76-4.44l-8-6.22C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.66l8-6.22z"
+        fill="#4CAF50"
+        d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.213 0-9.676-3.326-11.289-7.946l-6.52 5.02C9.518 39.556 16.227 44 24 44z"
       />
       <path
-        fill="#34A853"
-        d="M24 48c6.4 0 11.78-2.1 15.7-5.7l-7.26-5.63c-2.01 1.35-4.58 2.15-8.44 2.15-6.21 0-11.53-3.8-13.44-9.95l-8 6.22C6.51 42.62 14.62 48 24 48z"
+        fill="#1976D2"
+        d="M43.611 20.083H42V20H24v8h11.303c-.781 2.184-2.258 4.044-4.084 5.238l.003-.002 6.19 5.238C36.98 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
       />
     </svg>
   );
@@ -34,23 +42,20 @@ export function SignInCard({
   error?: string | null;
 }) {
   const onClick = async () => {
-    // Hardening: overwrite the NextAuth callback-url cookie so stale values (e.g. "/")
-    // can't hijack the post-login redirect.
-    // We set it server-side on auth.flexrz.com with Domain=.flexrz.com so it applies to flexrz.com.
+    // Hardening: overwrite the NextAuth callback-url cookie so stale values can't hijack redirects.
     try {
-      await fetch(`/api/auth/set-callback?callbackUrl=${encodeURIComponent(callbackUrl)}`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-        },
-      });
+      await fetch(
+        `/api/auth/set-callback?callbackUrl=${encodeURIComponent(callbackUrl)}`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+        }
+      );
     } catch {
-      // If this fails, we still attempt sign-in (better than blocking), but redirects may fall back to "/".
+      // best-effort
     }
 
-    // ✅ Use NextAuth client helper so CSRF + state cookies are created correctly.
-    // This prevents the immediate bounce back to /auth/signin?error=google.
     await signIn("google", {
       callbackUrl,
       redirect: true,
@@ -58,30 +63,127 @@ export function SignInCard({
   };
 
   return (
-    <div className="w-full max-w-md rounded-2xl border border-white/10 bg-black/40 p-6 shadow-xl backdrop-blur">
-      <div className="space-y-2">
-        <h1 className="text-xl font-semibold text-white">Sign in to Flexrz</h1>
-        <p className="text-sm text-white/70">Continue with Google to access your dashboard and booking experiences.</p>
+    <div style={{ width: "100%", maxWidth: 420 }}>
+      <div
+        style={{
+          borderRadius: 18,
+          border: "1px solid #e2e8f0",
+          background: "#ffffff",
+          boxShadow: "0 10px 30px rgba(15, 23, 42, 0.08)",
+          padding: "22px 20px 18px",
+        }}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            textTransform: "uppercase",
+            letterSpacing: "0.10em",
+            color: "#94a3b8",
+            marginBottom: 6,
+          }}
+        >
+          CUSTOMER SIGN IN
+        </div>
+
+        <div
+          style={{
+            fontSize: 22,
+            fontWeight: 700,
+            letterSpacing: "-0.02em",
+            marginBottom: 8,
+            color: "#0f172a",
+          }}
+        >
+          Log in to manage your bookings
+        </div>
+
+        <div
+          style={{
+            fontSize: 13,
+            lineHeight: 1.55,
+            color: "#64748b",
+            marginBottom: 16,
+          }}
+        >
+          Use your Google account to sign in. After that you&apos;ll confirm your
+          details and continue to the booking page.
+        </div>
+
+        {error ? (
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 8,
+              borderRadius: 12,
+              border: "1px solid rgba(239,68,68,0.25)",
+              background: "rgba(239,68,68,0.07)",
+              padding: "10px 12px",
+              fontSize: 13,
+              color: "#7f1d1d",
+            }}
+          >
+            Sign-in failed. Please try again.
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={onClick}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            padding: "12px 14px",
+            borderRadius: 999,
+            border: "1px solid rgba(15,23,42,0.10)",
+            background: "#0f172a",
+            color: "#ffffff",
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: "50%",
+              background: "#ffffff",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              flex: "0 0 20px",
+            }}
+          >
+            <GoogleSmallMark />
+          </span>
+          Continue with Google
+        </button>
       </div>
 
-      {error ? (
-        <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-          Sign-in failed. Please try again.
-        </div>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={onClick}
-        className="mt-6 inline-flex w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10 active:scale-[0.99]"
+      <div
+        style={{
+          marginTop: 18,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          color: "#64748b",
+          fontSize: 13,
+        }}
       >
-        <GoogleMark />
-        Continue with Google
-      </button>
-
-      <div className="mt-4 flex items-center justify-center gap-2 text-xs text-white/50">
         <span>Powered by</span>
-        <Image src="/brand/flexrz-logo-outline-light.svg" alt="Flexrz" width={48} height={16} />
+        <Image
+          src="/brand/flexrz-logo-outline-light.svg"
+          alt="Flexrz"
+          width={58}
+          height={18}
+          priority
+        />
       </div>
     </div>
   );
