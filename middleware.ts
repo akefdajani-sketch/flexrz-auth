@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-function resolveAndValidateReturnTo(raw: string, requestOrigin: string): string | null {
+function resolveAndValidateReturnTo(raw: string): string | null {
   try {
     // Allow relative paths (e.g. "/book/birdie-golf") by resolving against flexrz.com.
     const candidateUrl = raw.startsWith("/")
@@ -32,56 +32,6 @@ function resolveAndValidateReturnTo(raw: string, requestOrigin: string): string 
 export function middleware(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
-  // During the OAuth callback, NextAuth may still consult (or even overwrite)
-  // the callback-url cookie. To make the return target deterministic, we keep
-  // a short-lived "returnTo" cookie at the parent domain and re-apply the
-  // NextAuth callback cookies on /api/auth/callback/* requests.
-  if (pathname.startsWith("/api/auth/callback/")) {
-    const returnTo = req.cookies.get("flexrz-return-to")?.value;
-    if (!returnTo) return NextResponse.next();
-
-    const safeReturnTo = resolveAndValidateReturnTo(returnTo, req.nextUrl.origin);
-    if (!safeReturnTo) return NextResponse.next();
-
-    const res = NextResponse.next();
-    if (req.nextUrl.searchParams.has("__mwdebug")) {
-      res.headers.set("x-flexrz-auth-mw", "callback");
-    }
-    const common = {
-      path: "/",
-      sameSite: "lax" as const,
-      secure: true,
-      domain: ".flexrz.com",
-    };
-
-    res.cookies.set("__Secure-next-auth.callback-url", safeReturnTo, common);
-    return res;
-  }
-
-  // Target both the custom auth signin page and NextAuth's built-in /api/auth/signin.
-  // Some entry points may still hit /api/auth/signin directly (e.g. legacy links or
-  // NextAuth default helpers). If we don't overwrite callback cookies there too,
-  // a stale callbackUrl can win and send users to the wrong place (often flexrz.com).
-  const isSigninRoute = pathname === "/auth/signin" || pathname === "/api/auth/signin";
-  if (!isSigninRoute) return NextResponse.next();
-
-  const rawReturnTo = searchParams.get("returnTo") || searchParams.get("callbackUrl");
-  if (!rawReturnTo) {
-    return NextResponse.next();
-  }
-
-  const safeReturnTo = resolveAndValidateReturnTo(rawReturnTo, req.nextUrl.origin);
-  if (!safeReturnTo) {
-    return NextResponse.next();
-  }
-
-  // Overwrite NextAuth callback URL cookies at the parent domain,
-  // so stale values (like https://flexrz.com/) cannot win.
-  const res = NextResponse.next();
-  if (req.nextUrl.searchParams.has("__mwdebug")) {
-    res.headers.set("x-flexrz-auth-mw", "signin");
-  }
-
   const common = {
     path: "/",
     sameSite: "lax" as const,
@@ -89,9 +39,51 @@ export function middleware(req: NextRequest) {
     domain: ".flexrz.com",
   };
 
-  res.cookies.set("__Secure-next-auth.callback-url", safeReturnTo, common);
-  // Persist returnTo so we can re-assert it during /api/auth/callback/*.
-  res.cookies.set("flexrz-return-to", safeReturnTo, common);
+  // 1) OAuth callback: re-assert the callback-url cookie using the SAME-ORIGIN
+  // callbackUrl we stored during /auth/signin (flexrz-callback-url).
+  // This ensures NextAuth never tries to redirect cross-domain directly.
+  if (pathname.startsWith("/api/auth/callback/")) {
+    const cb = req.cookies.get("flexrz-callback-url")?.value;
+    if (!cb) return NextResponse.next();
+
+    const safeCb = resolveAndValidateReturnTo(cb);
+    if (!safeCb) return NextResponse.next();
+
+    const res = NextResponse.next();
+    res.cookies.set("__Secure-next-auth.callback-url", safeCb, common);
+    res.cookies.set("next-auth.callback-url", safeCb, common);
+    return res;
+  }
+
+  // 2) Sign-in entry points
+  const isSigninRoute = pathname === "/auth/signin" || pathname === "/api/auth/signin";
+  if (!isSigninRoute) return NextResponse.next();
+
+  const rawCallbackUrl = searchParams.get("callbackUrl");
+  const rawReturnTo = searchParams.get("returnTo");
+
+  // Prefer callbackUrl for NextAuth (must be same-origin with NEXTAUTH_URL),
+  // keep returnTo as the final destination (used by /return page).
+  const safeCallbackUrl = rawCallbackUrl ? resolveAndValidateReturnTo(rawCallbackUrl) : null;
+  const safeReturnTo = rawReturnTo ? resolveAndValidateReturnTo(rawReturnTo) : null;
+
+  if (!safeCallbackUrl && !safeReturnTo) return NextResponse.next();
+
+  const res = NextResponse.next();
+
+  // If we have a safe callbackUrl, write it into NextAuth cookies and also store it for callback stage.
+  if (safeCallbackUrl) {
+    res.cookies.set("__Secure-next-auth.callback-url", safeCallbackUrl, common);
+    res.cookies.set("next-auth.callback-url", safeCallbackUrl, common);
+    res.cookies.set("flexrz-callback-url", safeCallbackUrl, common);
+  }
+
+  // Store the final destination separately so /return can bounce to it.
+  // (If returnTo is missing, fall back to callbackUrl so we always have something.)
+  const finalReturn = safeReturnTo || safeCallbackUrl;
+  if (finalReturn) {
+    res.cookies.set("flexrz-return-to", finalReturn, common);
+  }
 
   return res;
 }
