@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
   const rawTo = safeDecode(url.searchParams.get("to") || "");
 
   const appHost = (process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com").toLowerCase();
-  const fallback = new URL("https://flexrz.com");
+  const fallback = new URL("https://flexrz.com/book/birdie-golf?dbg_fallback=auth_return_fallback");
   const target = (await normalizeReturnUrl(req, rawTo)) ?? fallback;
 
   // If the caller only provided the app *root* (or /tenant), we can still
