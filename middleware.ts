@@ -32,6 +32,23 @@ function resolveAndValidateReturnTo(raw: string): string | null {
 export function middleware(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
+  // 0) Safety net: if something redirects users to auth.flexrz.com/tenant/*,
+  // bounce them back to the tenant dashboard host (app.flexrz.com by default).
+  // This prevents 404s on sign-out flows where callbackUrl accidentally preserves the /tenant path.
+  if (pathname === "/tenant" || pathname.startsWith("/tenant/")) {
+    const appHost = (process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com").toLowerCase();
+    const currentHost = (req.headers.get("host") || "").toLowerCase();
+
+    // Avoid loops if middleware runs on the app host for some reason.
+    if (currentHost && currentHost !== appHost) {
+      const dest = new URL(req.nextUrl.toString());
+      dest.hostname = appHost;
+      dest.protocol = "https:";
+      return NextResponse.redirect(dest, 302);
+    }
+  }
+
+
   const common = {
     path: "/",
     sameSite: "lax" as const,
@@ -118,5 +135,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/auth/signin", "/api/auth/:path*"],
+  matcher: ["/auth/signin", "/api/auth/:path*", "/tenant/:path*"],
 };
