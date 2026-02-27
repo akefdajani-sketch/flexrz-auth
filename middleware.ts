@@ -44,6 +44,9 @@ export function middleware(req: NextRequest) {
     if (!safeReturnTo) return NextResponse.next();
 
     const res = NextResponse.next();
+    if (req.nextUrl.searchParams.has("__mwdebug")) {
+      res.headers.set("x-flexrz-auth-mw", "callback");
+    }
     const common = {
       path: "/",
       sameSite: "lax" as const,
@@ -52,7 +55,6 @@ export function middleware(req: NextRequest) {
     };
 
     res.cookies.set("__Secure-next-auth.callback-url", safeReturnTo, common);
-    res.cookies.set("next-auth.callback-url", safeReturnTo, common);
     return res;
   }
 
@@ -76,6 +78,9 @@ export function middleware(req: NextRequest) {
   // Overwrite NextAuth callback URL cookies at the parent domain,
   // so stale values (like https://flexrz.com/) cannot win.
   const res = NextResponse.next();
+  if (req.nextUrl.searchParams.has("__mwdebug")) {
+    res.headers.set("x-flexrz-auth-mw", "signin");
+  }
 
   const common = {
     path: "/",
@@ -85,7 +90,6 @@ export function middleware(req: NextRequest) {
   };
 
   res.cookies.set("__Secure-next-auth.callback-url", safeReturnTo, common);
-  res.cookies.set("next-auth.callback-url", safeReturnTo, common);
   // Persist returnTo so we can re-assert it during /api/auth/callback/*.
   res.cookies.set("flexrz-return-to", safeReturnTo, common);
 
