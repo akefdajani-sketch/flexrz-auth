@@ -162,6 +162,21 @@ export const authOptions: NextAuthOptions = {
         let candidate = decodeMaybe(url);
         candidate = stripNestedCallbackUrl(candidate);
 
+        // HARDENING: If NextAuth resolves the final redirect to the marketing root (https://flexrz.com/),
+        // do NOT send the user there. Instead bounce through auth /return, which will forward using
+        // the flexrz-return-to cookie set earlier in the flow.
+        try {
+          const cUrl = candidate.startsWith("/") ? new URL(candidate, AUTH_ORIGIN) : new URL(candidate);
+          const isMarketingRoot =
+            (cUrl.hostname === "flexrz.com" || cUrl.hostname === "www.flexrz.com") && (cUrl.pathname === "/" || cUrl.pathname === "");
+          const isBareRoot = cUrl.origin === AUTH_ORIGIN && (cUrl.pathname === "/" || cUrl.pathname === "");
+          if (isMarketingRoot || isBareRoot) {
+            const out = new URL("/return", AUTH_ORIGIN).toString();
+            if (DEBUG) console.info("[AUTH redirect] marketing/root detected → bounce to /return ->", out);
+            return out;
+          }
+        } catch {}
+
         // Always allow the auth-hosted bounce endpoint (/return).
         // This is the standard pattern: NextAuth redirects same-origin to auth,
         // then /return forwards to the final destination.

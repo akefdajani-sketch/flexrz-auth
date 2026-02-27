@@ -88,7 +88,11 @@ import { getToken } from "next-auth/jwt";
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const rawTo = safeDecode(url.searchParams.get("to") || "");
+  const rawToParam = safeDecode(url.searchParams.get("to") || "");
+  // If the caller didn't provide ?to=, fall back to the cookie set by our auth middleware.
+  // This is critical for flows where NextAuth loses callbackUrl and tries to send users to '/'.
+  const rawToCookie = safeDecode(req.cookies.get("flexrz-return-to")?.value || "");
+  const rawTo = (rawToParam || rawToCookie || "");
 
   const appHost = (process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com").toLowerCase();
 
