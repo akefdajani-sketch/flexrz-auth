@@ -134,7 +134,10 @@ export const authOptions: NextAuthOptions = {
       // as the marketing domain (e.g. https://flexrz.com). If we ever fall back
       // to that, users land on "/" even when a correct callbackUrl cookie exists.
       // Use NEXTAUTH_URL (auth origin) as the source of truth.
-      const AUTH_ORIGIN = (process.env.NEXTAUTH_URL || "https://auth.flexrz.com").replace(/\/$/, "");
+      const envOrigin = (process.env.NEXTAUTH_URL || "").replace(/\/$/, "");
+      const baseOrigin = (baseUrl || "").replace(/\/$/, "");
+      // Prefer the runtime baseUrl if it is the auth domain; otherwise prefer env if it is auth; else default.
+      const AUTH_ORIGIN = (baseOrigin.includes("auth.") ? baseOrigin : (envOrigin.includes("auth.") ? envOrigin : "https://auth.flexrz.com")).replace(/\/$/, "");
 
       // NextAuth sometimes passes encoded callbackUrl (e.g. "https%3A%2F%2F...").
       // Decode defensively (1–2 times) before validating.
@@ -172,6 +175,12 @@ export const authOptions: NextAuthOptions = {
           return candidate;
         }
 
+        // Also allow /return on the runtime baseUrl in case AUTH_ORIGIN differs (mis-set env, etc.)
+        if (baseOrigin && baseOrigin !== AUTH_ORIGIN && candidate.startsWith(`${baseOrigin}/return`)) {
+          if (DEBUG) console.info("[AUTH redirect] allow /return (baseOrigin absolute) ->", candidate);
+          return candidate;
+        }
+
         if (isBlockedAuthCallback(candidate)) {
           // Never allow returning to auth domain *pages* (except /return handled above)
           return AUTH_ORIGIN;
@@ -184,26 +193,8 @@ export const authOptions: NextAuthOptions = {
           console.info("[AUTH redirect] authOrigin=", AUTH_ORIGIN);
 
 
-// DIAG (temporary): if NextAuth resolves the post-login redirect to the marketing root,
-// reroute to a tagged URL so we can prove the redirect callback is returning the base URL.
-// Remove after root cause is fixed.
-try {
-  const c = new URL(candidate);
-  const b = new URL(baseUrl);
-  const isMarketingRoot =
-    (c.hostname === "flexrz.com" || c.hostname === "www.flexrz.com") &&
-    (c.pathname === "/" || c.pathname === "") &&
-    (c.search || "") === "";
-  const isComputedBaseRoot =
-    (c.origin === b.origin) && (c.pathname === "/" || c.pathname === "") && (c.search || "") === "";
-  if ((isMarketingRoot || isComputedBaseRoot) && !c.searchParams.has("dbg_redirect_cb")) {
-    const out = `https://flexrz.com/book/birdie-golf?dbg_redirect_cb=auth_nextauth_redirect_root&dbg_base=${encodeURIComponent(baseUrl)}`;
-    if (DEBUG) console.warn("[AUTH redirect] DIAG: candidate resolved to root →", candidate, "baseUrl=", baseUrl, "→", out);
-    return out;
-  }
-} catch {
-  // ignore
-}
+
+
 
         }
 
