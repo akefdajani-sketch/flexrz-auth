@@ -147,9 +147,12 @@ export async function GET(req: NextRequest) {
         aud: "booking-handoff",
         iat: now,
         exp: now + 5 * 60, // 5 minutes
-        // include google token so booking can talk to backend via Bearer fallback
-        google_id_token: token,
-        // useful identity fields (optional)
+        // Domain binding (booking verifies dest includes req.host)
+        dest: dest.origin,
+        // Include google token so booking can talk to backend via Bearer fallback
+        gid: token,
+        // Useful identity fields (optional)
+        sub: (decoded as any)?.sub || (decoded as any)?.id || undefined,
         email: (decoded as any)?.email || (decoded as any)?.user?.email || undefined,
         name: (decoded as any)?.name || (decoded as any)?.user?.name || undefined,
       };
