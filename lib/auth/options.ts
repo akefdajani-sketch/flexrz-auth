@@ -134,10 +134,7 @@ export const authOptions: NextAuthOptions = {
       // as the marketing domain (e.g. https://flexrz.com). If we ever fall back
       // to that, users land on "/" even when a correct callbackUrl cookie exists.
       // Use NEXTAUTH_URL (auth origin) as the source of truth.
-      const envOrigin = (process.env.NEXTAUTH_URL || "").replace(/\/$/, "");
-      const baseOrigin = (baseUrl || "").replace(/\/$/, "");
-      // Prefer the runtime baseUrl if it is the auth domain; otherwise prefer env if it is auth; else default.
-      const AUTH_ORIGIN = (baseOrigin.includes("auth.") ? baseOrigin : (envOrigin.includes("auth.") ? envOrigin : "https://auth.flexrz.com")).replace(/\/$/, "");
+      const AUTH_ORIGIN = (process.env.NEXTAUTH_URL || "https://auth.flexrz.com").replace(/\/$/, "");
 
       // NextAuth sometimes passes encoded callbackUrl (e.g. "https%3A%2F%2F...").
       // Decode defensively (1–2 times) before validating.
@@ -162,21 +159,6 @@ export const authOptions: NextAuthOptions = {
         let candidate = decodeMaybe(url);
         candidate = stripNestedCallbackUrl(candidate);
 
-        // HARDENING: If NextAuth resolves the final redirect to the marketing root (https://flexrz.com/),
-        // do NOT send the user there. Instead bounce through auth /return, which will forward using
-        // the flexrz-return-to cookie set earlier in the flow.
-        try {
-          const cUrl = candidate.startsWith("/") ? new URL(candidate, AUTH_ORIGIN) : new URL(candidate);
-          const isMarketingRoot =
-            (cUrl.hostname === "flexrz.com" || cUrl.hostname === "www.flexrz.com") && (cUrl.pathname === "/" || cUrl.pathname === "");
-          const isBareRoot = cUrl.origin === AUTH_ORIGIN && (cUrl.pathname === "/" || cUrl.pathname === "");
-          if (isMarketingRoot || isBareRoot) {
-            const out = new URL("/return", AUTH_ORIGIN).toString();
-            if (DEBUG) console.info("[AUTH redirect] marketing/root detected → bounce to /return ->", out);
-            return out;
-          }
-        } catch {}
-
         // Always allow the auth-hosted bounce endpoint (/return).
         // This is the standard pattern: NextAuth redirects same-origin to auth,
         // then /return forwards to the final destination.
@@ -190,12 +172,6 @@ export const authOptions: NextAuthOptions = {
           return candidate;
         }
 
-        // Also allow /return on the runtime baseUrl in case AUTH_ORIGIN differs (mis-set env, etc.)
-        if (baseOrigin && baseOrigin !== AUTH_ORIGIN && candidate.startsWith(`${baseOrigin}/return`)) {
-          if (DEBUG) console.info("[AUTH redirect] allow /return (baseOrigin absolute) ->", candidate);
-          return candidate;
-        }
-
         if (isBlockedAuthCallback(candidate)) {
           // Never allow returning to auth domain *pages* (except /return handled above)
           return AUTH_ORIGIN;
@@ -206,11 +182,6 @@ export const authOptions: NextAuthOptions = {
           console.info("[AUTH redirect] decoded candidate=", candidate);
           console.info("[AUTH redirect] baseUrl=", baseUrl);
           console.info("[AUTH redirect] authOrigin=", AUTH_ORIGIN);
-
-
-
-
-
         }
 
         // Relative paths: resolve against auth origin (not computed baseUrl)
