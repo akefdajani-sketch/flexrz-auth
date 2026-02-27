@@ -86,6 +86,47 @@ async function normalizeReturnUrl(req: NextRequest, rawTo: string | null): Promi
 }
 import { getToken } from "next-auth/jwt";
 
+// -----------------------------------------------------------------------------
+// Custom-domain login handoff
+// -----------------------------------------------------------------------------
+// Browsers cannot share cookies between different registrable domains.
+// Example: cookies for .flexrz.com are NOT readable by birdiegolf-jo.com.
+//
+// For tenant custom domains, we "handoff" a short-lived signed token via the
+// URL fragment. The custom domain consumes it client-side, calls its own
+// /api/customer-session/handoff endpoint, and mints a FIRST-PARTY cookie.
+//
+// IMPORTANT:
+// - We use the URL fragment (#...) so the token is never sent in HTTP requests.
+// - Token is short-lived and domain-bound (dest host must match).
+// -----------------------------------------------------------------------------
+
+function base64UrlEncode(buf: Buffer) {
+  return buf
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+function base64UrlEncodeJson(obj: any) {
+  return base64UrlEncode(Buffer.from(JSON.stringify(obj), "utf8"));
+}
+
+function hmacSha256(input: string, secret: string) {
+  const crypto = require("crypto") as typeof import("crypto");
+  return base64UrlEncode(crypto.createHmac("sha256", secret).update(input).digest());
+}
+
+function signHs256Jwt(payload: any, secret: string) {
+  const header = { alg: "HS256", typ: "JWT" };
+  const h = base64UrlEncodeJson(header);
+  const p = base64UrlEncodeJson(payload);
+  const signingInput = `${h}.${p}`;
+  const sig = hmacSha256(signingInput, secret);
+  return `${signingInput}.${sig}`;
+}
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const rawToParam = safeDecode(url.searchParams.get("to") || "");
@@ -127,6 +168,58 @@ export async function GET(req: NextRequest) {
     req,
     secret: process.env.NEXTAUTH_SECRET,
   });
+
+  // ---------------------------------------------------------------------------
+  // Custom-domain handoff
+  // ---------------------------------------------------------------------------
+  // If the redirect target is a registered tenant custom domain (NOT *.flexrz.com),
+  // we attach a short-lived signed token via URL fragment so that the custom domain
+  // can mint its OWN first-party session cookie.
+  //
+  // We DO NOT rely on cross-site cookie reads (impossible across eTLD+1).
+  //
+  // Token contents are intentionally minimal and short-lived.
+  // ---------------------------------------------------------------------------
+  try {
+    const host = target.hostname.toLowerCase();
+    const isFlexrz = isAllowedFlexrzHost(host);
+    const isCustomDomain = !isFlexrz && (await isRegisteredTenantDomain(host));
+
+    if (isCustomDomain && token) {
+      const secret = (process.env.BOOKING_HANDOFF_SECRET || process.env.NEXTAUTH_SECRET || "").trim();
+      if (secret) {
+        const now = Math.floor(Date.now() / 1000);
+        const exp = now + 90; // 90 seconds: enough for the browser to land + call handoff
+
+        const googleIdToken = (token as any)?.google_id_token || null;
+        const email = (token as any)?.email || (token as any)?.user?.email || null;
+        const sub = (token as any)?.sub || null;
+
+        if (googleIdToken) {
+          const handoffJwt = signHs256Jwt(
+            {
+              iss: "auth.flexrz.com",
+              aud: "flexrz-booking-handoff",
+              iat: now,
+              exp,
+              dest: `https://${host}`,
+              sub,
+              email,
+              gid: googleIdToken,
+            },
+            secret
+          );
+
+          // Use URL fragment so the token is NOT sent to the server in HTTP requests.
+          const currentHash = target.hash ? target.hash.replace(/^#/, "") : "";
+          const frag = `flexrz_handoff=${encodeURIComponent(handoffJwt)}`;
+          target.hash = currentHash ? `${currentHash}&${frag}` : frag;
+        }
+      }
+    }
+  } catch {
+    // Never break redirect on handoff failures; custom domain will simply appear logged out.
+  }
 
   // IMPORTANT:
   // Do NOT forward Google id_tokens via URL fragments (/#id_token=...).
