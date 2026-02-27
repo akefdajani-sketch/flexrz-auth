@@ -32,8 +32,6 @@ function resolveAndValidateReturnTo(raw: string): string | null {
 export function middleware(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
 
-  const AUTH_ORIGIN = (process.env.NEXTAUTH_URL || "https://auth.flexrz.com").replace(/\/$/, "");
-
   const common = {
     path: "/",
     sameSite: "lax" as const,
@@ -45,29 +43,32 @@ export function middleware(req: NextRequest) {
   // callbackUrl we stored during /auth/signin (flexrz-callback-url).
   // This ensures NextAuth never tries to redirect cross-domain directly.
   if (pathname.startsWith("/api/auth/callback/")) {
-    // Prefer the same-origin callbackUrl we stored during /auth/signin (flexrz-callback-url).
-    // If it is missing (e.g. caller only provided returnTo), synthesize a safe same-origin
-    // callbackUrl from flexrz-return-to so NextAuth never falls back to "/".
-    const cb = req.cookies.get("flexrz-callback-url")?.value;
-    const rt = req.cookies.get("flexrz-return-to")?.value;
+    // At callback stage, NextAuth will decide where to redirect based on its callback-url cookie.
+    // We ensure that cookie is ALWAYS set to a same-origin "/return?to=..." URL.
+    let cb = req.cookies.get("flexrz-callback-url")?.value;
 
-    let safeCb: string | null = null;
-
-    if (cb) safeCb = resolveAndValidateReturnTo(cb);
-
-    if (!safeCb && rt) {
-      const safeRt = resolveAndValidateReturnTo(rt);
+    // If legacy flow didn't set flexrz-callback-url, synthesize it from flexrz-return-to.
+    if (!cb) {
+      const rt = req.cookies.get("flexrz-return-to")?.value;
+      const safeRt = rt ? resolveAndValidateReturnTo(rt) : null;
       if (safeRt) {
-        const fromHost = req.nextUrl.searchParams.get("from") || req.headers.get("host") || "";
-        safeCb = `${AUTH_ORIGIN}/return?to=${encodeURIComponent(safeRt)}${fromHost ? `&from=${encodeURIComponent(fromHost)}` : ""}`;
+        const from = (req.headers.get("host") || "").toLowerCase() || "unknown";
+        const authReturn = new URL("/return", req.nextUrl.origin);
+        authReturn.searchParams.set("to", safeRt);
+        authReturn.searchParams.set("from", from);
+        cb = authReturn.toString();
       }
     }
 
+    if (!cb) return NextResponse.next();
+
+    const safeCb = resolveAndValidateReturnTo(cb);
     if (!safeCb) return NextResponse.next();
 
     const res = NextResponse.next();
     res.cookies.set("__Secure-next-auth.callback-url", safeCb, common);
     res.cookies.set("next-auth.callback-url", safeCb, common);
+    // Keep our helper cookie in sync for future requests.
     res.cookies.set("flexrz-callback-url", safeCb, common);
     return res;
   }
@@ -81,30 +82,34 @@ export function middleware(req: NextRequest) {
 
   // Prefer callbackUrl for NextAuth (must be same-origin with NEXTAUTH_URL),
   // keep returnTo as the final destination (used by /return page).
-  let safeCallbackUrl = rawCallbackUrl ? resolveAndValidateReturnTo(rawCallbackUrl) : null;
+  const safeCallbackUrl = rawCallbackUrl ? resolveAndValidateReturnTo(rawCallbackUrl) : null;
   const safeReturnTo = rawReturnTo ? resolveAndValidateReturnTo(rawReturnTo) : null;
 
   if (!safeCallbackUrl && !safeReturnTo) return NextResponse.next();
 
+  // If callbackUrl is missing but returnTo exists, synthesize a safe same-origin callbackUrl
+  // to force NextAuth to always redirect back through auth.flexrz.com/return.
+  let effectiveCallbackUrl = safeCallbackUrl;
+  if (!effectiveCallbackUrl && safeReturnTo) {
+    const from = (req.headers.get("host") || "").toLowerCase() || "unknown";
+    const authReturn = new URL("/return", req.nextUrl.origin);
+    authReturn.searchParams.set("to", safeReturnTo);
+    authReturn.searchParams.set("from", from);
+    effectiveCallbackUrl = authReturn.toString();
+  }
+
   const res = NextResponse.next();
+
+  // If we have a safe callbackUrl, write it into NextAuth cookies and also store it for callback stage.
+  if (effectiveCallbackUrl) {
+    res.cookies.set("__Secure-next-auth.callback-url", effectiveCallbackUrl, common);
+    res.cookies.set("next-auth.callback-url", effectiveCallbackUrl, common);
+    res.cookies.set("flexrz-callback-url", effectiveCallbackUrl, common);
+  }
 
   // Store the final destination separately so /return can bounce to it.
   // (If returnTo is missing, fall back to callbackUrl so we always have something.)
-  const finalReturn = safeReturnTo || safeCallbackUrl;
-  if (!safeCallbackUrl && finalReturn) {
-    // If caller provided only returnTo (and no callbackUrl), synthesize a same-origin callbackUrl
-    // so NextAuth doesn't fall back to "/" after OAuth callback.
-    const fromHost = searchParams.get("from") || req.headers.get("host") || "";
-    safeCallbackUrl = `${AUTH_ORIGIN}/return?to=${encodeURIComponent(finalReturn)}${fromHost ? `&from=${encodeURIComponent(fromHost)}` : ""}`;
-  }
-
-
-  // If we have a safe callbackUrl, write it into NextAuth cookies and also store it for callback stage.
-  if (safeCallbackUrl) {
-    res.cookies.set("__Secure-next-auth.callback-url", safeCallbackUrl, common);
-    res.cookies.set("next-auth.callback-url", safeCallbackUrl, common);
-    res.cookies.set("flexrz-callback-url", safeCallbackUrl, common);
-  }
+  const finalReturn = safeReturnTo || effectiveCallbackUrl;
   if (finalReturn) {
     res.cookies.set("flexrz-return-to", finalReturn, common);
   }
