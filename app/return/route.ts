@@ -42,9 +42,20 @@ async function isRegisteredTenantDomain(hostname: string): Promise<boolean> {
   }
 }
 
-async function normalizeReturnUrl(req: NextRequest, rawTo: string | null) {
+type NormalizeResult =
+  | { ok: true; url: URL }
+  | {
+      ok: false;
+      reason:
+        | "missing_to"
+        | "invalid_url"
+        | "protocol_not_https"
+        | "host_not_allowed";
+    };
+
+async function normalizeReturnUrl(req: NextRequest, rawTo: string | null): Promise<NormalizeResult> {
   const to = (rawTo || "").trim();
-  if (!to) return null;
+  if (!to) return { ok: false, reason: "missing_to" };
 
   // Support both absolute URLs and relative paths.
   // Relative paths will be treated as relative to:
@@ -59,18 +70,18 @@ async function normalizeReturnUrl(req: NextRequest, rawTo: string | null) {
         ? from
         : appHost;
 
-    return new URL(`https://${baseHost}${to}`);
+    return { ok: true, url: new URL(`https://${baseHost}${to}`) };
   }
 
   try {
     const u = new URL(to);
-    if (u.protocol !== "https:") return null;
+    if (u.protocol !== "https:") return { ok: false, reason: "protocol_not_https" };
     const host = u.hostname.toLowerCase();
     const allowed = isAllowedFlexrzHost(host) || (await isRegisteredTenantDomain(host));
-    if (!allowed) return null;
-    return u;
+    if (!allowed) return { ok: false, reason: "host_not_allowed" };
+    return { ok: true, url: u };
   } catch {
-    return null;
+    return { ok: false, reason: "invalid_url" };
   }
 }
 import { getToken } from "next-auth/jwt";
@@ -80,8 +91,19 @@ export async function GET(req: NextRequest) {
   const rawTo = safeDecode(url.searchParams.get("to") || "");
 
   const appHost = (process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com").toLowerCase();
+
+  // Diagnostic fallback target (Patch Set A / Step 1)
+  // If /return cannot normalize/validate the `to=` param, we redirect to Birdie booking
+  // with a reason tag so we can identify WHY it fell back.
   const fallback = new URL("https://flexrz.com/book/birdie-golf?dbg_fallback=auth_return_fallback");
-  const target = (await normalizeReturnUrl(req, rawTo)) ?? fallback;
+
+  const normalized = await normalizeReturnUrl(req, rawTo);
+  const target = normalized.ok
+    ? normalized.url
+    : (() => {
+        fallback.searchParams.set("dbg_reason", normalized.reason);
+        return fallback;
+      })();
 
   // If the caller only provided the app *root* (or /tenant), we can still
   // land them on the correct tenant by using the cookie set by app.flexrz.com.
