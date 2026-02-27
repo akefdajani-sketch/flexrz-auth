@@ -182,6 +182,29 @@ export const authOptions: NextAuthOptions = {
           console.info("[AUTH redirect] decoded candidate=", candidate);
           console.info("[AUTH redirect] baseUrl=", baseUrl);
           console.info("[AUTH redirect] authOrigin=", AUTH_ORIGIN);
+
+
+// DIAG (temporary): if NextAuth resolves the post-login redirect to the marketing root,
+// reroute to a tagged URL so we can prove the redirect callback is returning the base URL.
+// Remove after root cause is fixed.
+try {
+  const c = new URL(candidate);
+  const b = new URL(baseUrl);
+  const isMarketingRoot =
+    (c.hostname === "flexrz.com" || c.hostname === "www.flexrz.com") &&
+    (c.pathname === "/" || c.pathname === "") &&
+    (c.search || "") === "";
+  const isComputedBaseRoot =
+    (c.origin === b.origin) && (c.pathname === "/" || c.pathname === "") && (c.search || "") === "";
+  if ((isMarketingRoot || isComputedBaseRoot) && !c.searchParams.has("dbg_redirect_cb")) {
+    const out = `https://flexrz.com/book/birdie-golf?dbg_redirect_cb=auth_nextauth_redirect_root&dbg_base=${encodeURIComponent(baseUrl)}`;
+    if (DEBUG) console.warn("[AUTH redirect] DIAG: candidate resolved to root →", candidate, "baseUrl=", baseUrl, "→", out);
+    return out;
+  }
+} catch {
+  // ignore
+}
+
         }
 
         // Relative paths: resolve against auth origin (not computed baseUrl)
