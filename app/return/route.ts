@@ -8,10 +8,6 @@ function safeDecode(v: string) {
   }
 }
 
-// Security: prevent open redirects.
-// Allow:
-//   - *.flexrz.com (and flexrz.com)
-//   - Any tenant custom domain registered as ACTIVE in the backend (tenant_domains)
 function isAllowedFlexrzHost(hostname: string) {
   const h = (hostname || "").toLowerCase();
   return h === "flexrz.com" || h === "www.flexrz.com" || h.endsWith(".flexrz.com");
@@ -57,10 +53,6 @@ async function normalizeReturnUrl(req: NextRequest, rawTo: string | null): Promi
   const to = (rawTo || "").trim();
   if (!to) return { ok: false, reason: "missing_to" };
 
-  // Support both absolute URLs and relative paths.
-  // Relative paths will be treated as relative to:
-  //   - ?from=<host> if provided AND allowed, else
-  //   - app.flexrz.com by default.
   if (to.startsWith("/")) {
     const from = (req.nextUrl.searchParams.get("from") || "").trim().toLowerCase();
     const appHost = (process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com").toLowerCase();
@@ -90,11 +82,15 @@ import { getToken } from "next-auth/jwt";
 // Custom-domain login handoff
 // -----------------------------------------------------------------------------
 // Browsers cannot share cookies between different registrable domains.
-// Example: cookies for .flexrz.com are NOT readable by birdiegolf-jo.com.
 //
-// For tenant custom domains, we "handoff" a short-lived signed token via the
-// URL fragment. The custom domain consumes it client-side, calls its own
-// /api/customer-session/handoff endpoint, and mints a FIRST-PARTY cookie.
+// For tenant custom domains we "handoff" a short-lived signed token via the
+// URL fragment (#flexrz_handoff=...). The custom domain consumes it client-side,
+// calls its own /api/customer-session/handoff endpoint, and mints a FIRST-PARTY
+// cookie on that domain.
+//
+// Token payload now includes BOTH:
+//   gid  — Google ID token (backward compat for old bf_session readers)
+//   app  — Flexrz App JWT (long-lived, ~30 days, used by requireAppAuth)
 //
 // IMPORTANT:
 // - We use the URL fragment (#...) so the token is never sent in HTTP requests.
@@ -130,16 +126,11 @@ function signHs256Jwt(payload: any, secret: string) {
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const rawToParam = safeDecode(url.searchParams.get("to") || "");
-  // If the caller didn't provide ?to=, fall back to the cookie set by our auth middleware.
-  // This is critical for flows where NextAuth loses callbackUrl and tries to send users to '/'.
   const rawToCookie = safeDecode(req.cookies.get("flexrz-return-to")?.value || "");
   const rawTo = (rawToParam || rawToCookie || "");
 
   const appHost = (process.env.NEXT_PUBLIC_APP_HOST || "app.flexrz.com").toLowerCase();
 
-  // Diagnostic fallback target (Patch Set A / Step 1)
-  // If /return cannot normalize/validate the `to=` param, we redirect to Birdie booking
-  // with a reason tag so we can identify WHY it fell back.
   const fallback = new URL("https://flexrz.com/book/birdie-golf?dbg_fallback=auth_return_fallback");
 
   const normalized = await normalizeReturnUrl(req, rawTo);
@@ -150,8 +141,6 @@ export async function GET(req: NextRequest) {
         return fallback;
       })();
 
-  // If the caller only provided the app *root* (or /tenant), we can still
-  // land them on the correct tenant by using the cookie set by app.flexrz.com.
   if (target.hostname.toLowerCase() === appHost) {
     const p = target.pathname || "/";
     const isRootish = p === "/" || p === "" || p === "/tenant" || p === "/tenant/";
@@ -163,22 +152,13 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Read the NextAuth JWT directly from cookies in THIS request
   const token = await getToken({
     req,
     secret: process.env.NEXTAUTH_SECRET,
   });
 
   // ---------------------------------------------------------------------------
-  // Custom-domain handoff
-  // ---------------------------------------------------------------------------
-  // If the redirect target is a registered tenant custom domain (NOT *.flexrz.com),
-  // we attach a short-lived signed token via URL fragment so that the custom domain
-  // can mint its OWN first-party session cookie.
-  //
-  // We DO NOT rely on cross-site cookie reads (impossible across eTLD+1).
-  //
-  // Token contents are intentionally minimal and short-lived.
+  // Custom-domain handoff — include both gid (backward compat) and app (new)
   // ---------------------------------------------------------------------------
   try {
     const host = target.hostname.toLowerCase();
@@ -189,13 +169,17 @@ export async function GET(req: NextRequest) {
       const secret = (process.env.BOOKING_HANDOFF_SECRET || process.env.NEXTAUTH_SECRET || "").trim();
       if (secret) {
         const now = Math.floor(Date.now() / 1000);
-        const exp = now + 90; // 90 seconds: enough for the browser to land + call handoff
+        const exp = now + 90; // 90 seconds: bridge token only
 
         const googleIdToken = (token as any)?.google_id_token || null;
+        // NEW: Flexrz App JWT — long-lived token for backend API auth
+        const appJwt = (token as any)?.app_jwt || null;
         const email = (token as any)?.email || (token as any)?.user?.email || null;
         const sub = (token as any)?.sub || null;
+        const name = (token as any)?.name || null;
 
-        if (googleIdToken) {
+        // Only hand off if we have at least one usable auth token
+        if (googleIdToken || appJwt) {
           const handoffJwt = signHs256Jwt(
             {
               iss: "auth.flexrz.com",
@@ -205,12 +189,14 @@ export async function GET(req: NextRequest) {
               dest: `https://${host}`,
               sub,
               email,
-              gid: googleIdToken,
+              name,
+              // Both tokens included — handoff receiver stores whichever is present
+              gid: googleIdToken,   // backward compat (short-lived, ~1hr)
+              app: appJwt,          // NEW: long-lived Flexrz App JWT (30 days)
             },
             secret
           );
 
-          // Use URL fragment so the token is NOT sent to the server in HTTP requests.
           const currentHash = target.hash ? target.hash.replace(/^#/, "") : "";
           const frag = `flexrz_handoff=${encodeURIComponent(handoffJwt)}`;
           target.hash = currentHash ? `${currentHash}&${frag}` : frag;
@@ -221,16 +207,6 @@ export async function GET(req: NextRequest) {
     // Never break redirect on handoff failures; custom domain will simply appear logged out.
   }
 
-  // IMPORTANT:
-  // Do NOT forward Google id_tokens via URL fragments (/#id_token=...).
-  // Fragments are never sent to the server and they cause the exact symptom
-  // you are seeing: landing on app.flexrz.com/#id_token=... with routing broken.
-  //
-  // The canonical approach here is:
-  //   1) NextAuth sets a session cookie for Domain=.flexrz.com (configured in auth)
-  //   2) app.flexrz.com reads the shared session cookie (consumer) via next-auth/jwt getToken()
-  //
-  // So we ignore the Google id token here and simply redirect.
   void token;
 
   return NextResponse.redirect(target.toString(), 302);

@@ -1,9 +1,60 @@
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import crypto from "crypto";
 
 // NOTE: We intentionally do NOT store or refresh Google access tokens in the NextAuth JWT.
 // The JWT is stored in a cookie and must remain comfortably under browser cookie limits.
-// We only persist the Google *ID token* for backend verification.
+// We persist the Google *ID token* for backward compat AND a long-lived Flexrz App JWT
+// for backend API auth (replaces the ~1-hour Google token in the booking/customer flow).
+
+// ---------------------------------------------------------------------------
+// Flexrz App JWT helpers
+// ---------------------------------------------------------------------------
+// We mint a long-lived HS256 JWT at sign-in time so backend routes can verify
+// identity without relying on the short-lived (~1hr) Google ID token.
+// ---------------------------------------------------------------------------
+
+function base64UrlEncode(buf: Buffer) {
+  return buf.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+function signHs256Jwt(payload: Record<string, any>, secret: string): string {
+  const header = { alg: "HS256", typ: "JWT" };
+  const h = base64UrlEncode(Buffer.from(JSON.stringify(header)));
+  const p = base64UrlEncode(Buffer.from(JSON.stringify(payload)));
+  const signingInput = `${h}.${p}`;
+  const sig = base64UrlEncode(
+    crypto.createHmac("sha256", secret).update(signingInput).digest()
+  );
+  return `${signingInput}.${sig}`;
+}
+
+function mintFlexrzAppJwt(token: any): string | null {
+  const secret = (
+    process.env.FLEXRZ_APP_JWT_SECRET ||
+    process.env.NEXTAUTH_SECRET ||
+    ""
+  ).trim();
+  if (!secret) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: "auth.flexrz.com",
+    sub: token?.sub || null,
+    email: (token?.email || "").toLowerCase() || null,
+    name: token?.name || null,
+    iat: now,
+    exp: now + 30 * 24 * 60 * 60, // 30 days — matches session lifetime
+  };
+
+  try {
+    return signHs256Jwt(payload, secret);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 function isAllowedRedirectHost(hostname: string) {
   const host = (hostname || "").toLowerCase();
@@ -178,8 +229,6 @@ export const authOptions: NextAuthOptions = {
         } catch {}
 
         // Always allow the auth-hosted bounce endpoint (/return).
-        // This is the standard pattern: NextAuth redirects same-origin to auth,
-        // then /return forwards to the final destination.
         if (candidate.startsWith("/return")) {
           const out = new URL(candidate, AUTH_ORIGIN).toString();
           if (DEBUG) console.info("[AUTH redirect] allow /return (relative) ->", out);
@@ -190,14 +239,12 @@ export const authOptions: NextAuthOptions = {
           return candidate;
         }
 
-        // Also allow /return on the runtime baseUrl in case AUTH_ORIGIN differs (mis-set env, etc.)
         if (baseOrigin && baseOrigin !== AUTH_ORIGIN && candidate.startsWith(`${baseOrigin}/return`)) {
           if (DEBUG) console.info("[AUTH redirect] allow /return (baseOrigin absolute) ->", candidate);
           return candidate;
         }
 
         if (isBlockedAuthCallback(candidate)) {
-          // Never allow returning to auth domain *pages* (except /return handled above)
           return AUTH_ORIGIN;
         }
 
@@ -206,20 +253,12 @@ export const authOptions: NextAuthOptions = {
           console.info("[AUTH redirect] decoded candidate=", candidate);
           console.info("[AUTH redirect] baseUrl=", baseUrl);
           console.info("[AUTH redirect] authOrigin=", AUTH_ORIGIN);
-
-
-
-
-
         }
 
-        // Relative paths: resolve against auth origin (not computed baseUrl)
         if (candidate.startsWith("/")) return new URL(candidate, AUTH_ORIGIN).toString();
 
-        // Absolute URLs: allow only Flexrz domains + local dev
         const target = new URL(candidate);
 
-        // allow same-origin to auth always
         if (target.origin === AUTH_ORIGIN) return candidate;
 
         if (isAllowedRedirectHost(target.hostname)) {
@@ -236,11 +275,28 @@ export const authOptions: NextAuthOptions = {
     },
 
     async jwt({ token, account }) {
-      // On initial sign-in, persist ONLY the Google ID token into the JWT.
-      // Storing access/refresh tokens can push the cookie over 4KB and break sessions.
+      // On initial sign-in, persist the Google ID token AND mint a long-lived Flexrz App JWT.
+      //
+      // Why two tokens?
+      // - google_id_token: kept for backward compatibility with any code still reading it.
+      //   Its actual lifetime is ~1 hour; we no longer use it for API auth.
+      // - app_jwt: our own HS256 JWT, 30-day expiry, used by requireAppAuth on the backend.
+      //   This eliminates the 1-hour auth drop that caused booking/customer actions to fail.
       if (account?.provider === "google") {
         const idToken = (account as any).id_token as string | undefined;
         (token as any).google_id_token = idToken || (token as any).google_id_token || null;
+
+        // Mint a long-lived Flexrz App JWT for backend API auth.
+        // This runs ONLY on initial sign-in (account is present), so the 30-day
+        // token is minted once and stored in the encrypted NextAuth cookie.
+        const appJwt = mintFlexrzAppJwt(token);
+        if (appJwt) {
+          (token as any).app_jwt = appJwt;
+          console.log("[NextAuth jwt] minted app_jwt for", (token as any)?.email || "unknown");
+        } else {
+          console.warn("[NextAuth jwt] FLEXRZ_APP_JWT_SECRET not set — app_jwt not minted");
+        }
+
         (token as any).error = null;
         return token;
       }
@@ -249,7 +305,10 @@ export const authOptions: NextAuthOptions = {
     },
 
     async session({ session, token }) {
+      // Expose google_id_token for backward compat (not used for API auth anymore).
       (session as any).google_id_token = (token as any).google_id_token || null;
+      // Expose app_jwt — booking frontend reads this to use as Bearer for customer API calls.
+      (session as any).app_jwt = (token as any).app_jwt || null;
       (session as any).tokenError = (token as any).error || null;
       return session;
     },
@@ -263,7 +322,6 @@ export const authOptions: NextAuthOptions = {
       console.log("[NextAuth event:signOut]", message);
     },
     async session(message) {
-      // Fires when a session is checked/created. Helpful for debugging cookie issues.
       console.log("[NextAuth event:session]", message?.session?.user?.email || message);
     },
   },
