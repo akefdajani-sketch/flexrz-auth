@@ -59,6 +59,11 @@ function pickGoogleToken(decoded: any): string | null {
   );
 }
 
+function pickAppJwt(decoded: any): string | null {
+  if (!decoded) return null;
+  return decoded.app_jwt || null;
+}
+
 function base64UrlEncode(buf: Buffer) {
   return buf.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
@@ -88,7 +93,8 @@ function isFlexrzTopLevel(hostname: string): boolean {
  *
  * booking domain -> https://auth.flexrz.com/bridge?returnTo=https://tenant-domain.com/book/slug
  * - if not signed in -> redirect to /auth/signin (callback back here)
- * - if signed in -> redirect back with #id_token=...
+ * - if signed in -> redirect back with #flexrz_handoff=... for custom domains
+ *   (includes app_jwt when available, plus legacy google token fallback)
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -125,8 +131,9 @@ export async function GET(req: NextRequest) {
 
   const decoded = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
   const token = pickGoogleToken(decoded);
+  const appJwt = pickAppJwt(decoded);
 
-  if (!token) {
+  if (!token && !appJwt) {
     const cb = encodeURIComponent(
       `${url.origin}/bridge?returnTo=${encodeURIComponent(returnTo.toString())}`
     );
@@ -149,7 +156,8 @@ export async function GET(req: NextRequest) {
         exp: now + 5 * 60, // 5 minutes
         // Domain binding (booking verifies dest includes req.host)
         dest: dest.origin,
-        // Include google token so booking can talk to backend via Bearer fallback
+        // Include BOTH auth forms. Booking/custom-domain proxy prefers app first.
+        app: appJwt,
         gid: token,
         // Useful identity fields (optional)
         sub: (decoded as any)?.sub || (decoded as any)?.id || undefined,
@@ -163,7 +171,9 @@ export async function GET(req: NextRequest) {
     // If secret missing, fall back to legacy id_token hash.
   }
 
-  dest.hash = `id_token=${encodeURIComponent(token)}`;
+  if (token) {
+    dest.hash = `id_token=${encodeURIComponent(token)}`;
+  }
   return NextResponse.redirect(dest.toString(), 302);
 
 }
