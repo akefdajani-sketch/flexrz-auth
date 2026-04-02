@@ -65,7 +65,12 @@ function isAllowedRedirectHost(hostname: string) {
     host === "localhost" ||
     host.endsWith(".localhost") ||
     host.endsWith(".local") ||
-    host === "127.0.0.1"
+    host === "127.0.0.1" ||
+    (process.env.AUTH_ALLOWED_CUSTOM_REDIRECT_HOSTS || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+      .includes(host)
   );
 }
 

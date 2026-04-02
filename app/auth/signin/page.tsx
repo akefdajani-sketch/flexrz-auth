@@ -17,9 +17,33 @@ function isAllowedHost(host: string) {
   );
 }
 
+function getBackendBase(): string {
+  return (
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    ""
+  ).trim();
+}
+
+async function isRegisteredTenantDomain(hostname: string): Promise<boolean> {
+  const backend = getBackendBase();
+  if (!backend) return false;
+  try {
+    const u = new URL("/api/tenant-domains/_public/resolve", backend);
+    u.searchParams.set("domain", hostname);
+    const res = await fetch(u.toString(), { next: { revalidate: 60 } });
+    if (!res.ok) return false;
+    const json = (await res.json()) as any;
+    const slug = (json?.slug || json?.tenantSlug || "").toString().trim();
+    return !!slug;
+  } catch {
+    return false;
+  }
+}
+
 function decodeMaybe(input: string): string {
   let out = input;
-  // Decode up to 2 times to handle accidental double-encoding across redirects.
   for (let i = 0; i < 2; i++) {
     if (!/%[0-9A-Fa-f]{2}/.test(out)) break;
     try {
@@ -33,29 +57,22 @@ function decodeMaybe(input: string): string {
   return out;
 }
 
-function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
+async function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): Promise<string> {
   const vRaw = typeof raw === "string" ? raw : "";
   const v = decodeMaybe(vRaw);
   const from = typeof fromRaw === "string" ? fromRaw : "";
-
-  // Default safe landing
   const fallback = "https://flexrz.com";
 
-  // Determine base origin for relative callbackUrls.
-  // Priority:
-  // 1) explicit "from" param (set by redirectToCentralGoogleAuth)
-  // 2) fallback to flexrz.com
   let baseOrigin = fallback;
   if (from) {
     const cleanedFrom = from.replace(/^https?:\/\//i, "").split("/")[0];
-    if (isAllowedHost(cleanedFrom)) {
+    if (isAllowedHost(cleanedFrom) || (await isRegisteredTenantDomain(cleanedFrom))) {
       baseOrigin = `https://${cleanedFrom}`;
     }
   }
 
   if (!v) return baseOrigin;
 
-  // Relative → resolve against the initiating origin (NOT always app.flexrz.com)
   if (v.startsWith("/")) {
     try {
       return new URL(v, baseOrigin).toString();
@@ -64,13 +81,12 @@ function sanitizeCallbackUrl(raw: unknown, fromRaw: unknown): string {
     }
   }
 
-  // Absolute → allow only flexrz.com + subdomains (+ local dev)
   try {
     const u = new URL(v);
-    if (isAllowedHost(u.hostname)) return v;
-  } catch {
-    // ignore
-  }
+    if (isAllowedHost(u.hostname) || (await isRegisteredTenantDomain(u.hostname))) {
+      return u.toString();
+    }
+  } catch {}
 
   return baseOrigin;
 }
@@ -80,23 +96,17 @@ export default async function SignInPage({
 }: {
   searchParams?: { callbackUrl?: string; returnTo?: string; from?: string };
 }) {
-  // IMPORTANT: Next.js 16 types `headers()` as async in some builds.
-  // Call it once in the function body to avoid parser issues and reuse it.
   const hdrs = await headers();
 
-  // Primary: prefer explicit returnTo (set by booking app), then callbackUrl.
-  // This avoids stale callback-url cookies forcing redirects to '/'.
   const preferred = searchParams?.returnTo || searchParams?.callbackUrl;
-  let callbackUrl = sanitizeCallbackUrl(preferred, searchParams?.from);
+  let callbackUrl = await sanitizeCallbackUrl(preferred, searchParams?.from);
   let refForDebug: string | null = null;
 
-  // If callbackUrl isn't provided (e.g. user navigated to /auth/signin directly from a deep link),
-  // recover the originating URL from Referer so post-login returns to /book/... instead of '/'.
   if (!preferred) {
     refForDebug = hdrs.get("referer");
     const ref = refForDebug;
     if (ref) {
-      callbackUrl = sanitizeCallbackUrl(ref, searchParams?.from || ref);
+      callbackUrl = await sanitizeCallbackUrl(ref, searchParams?.from || ref);
     }
   }
 

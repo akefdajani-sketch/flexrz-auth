@@ -17,6 +17,31 @@ function isAllowedHost(host: string) {
   );
 }
 
+function getBackendBase(): string {
+  return (
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    ""
+  ).trim();
+}
+
+async function isRegisteredTenantDomain(hostname: string): Promise<boolean> {
+  const backend = getBackendBase();
+  if (!backend) return false;
+  try {
+    const u = new URL("/api/tenant-domains/_public/resolve", backend);
+    u.searchParams.set("domain", hostname);
+    const res = await fetch(u.toString(), { next: { revalidate: 60 } });
+    if (!res.ok) return false;
+    const json = (await res.json()) as any;
+    const slug = (json?.slug || json?.tenantSlug || "").toString().trim();
+    return !!slug;
+  } catch {
+    return false;
+  }
+}
+
 function decodeMaybe(input: string): string {
   let out = (input || "").trim();
   for (let i = 0; i < 2; i++) {
@@ -31,13 +56,7 @@ function decodeMaybe(input: string): string {
   return out;
 }
 
-/**
- * Normalize callbackUrl for sign-out.
- * - Supports absolute URLs (allowed hosts only)
- * - Supports relative paths via ?from=<host> (allowed hosts only)
- * - Falls back to https://flexrz.com
- */
-function sanitizeCallbackUrl(raw: string | null, fromRaw: string | null): string {
+async function sanitizeCallbackUrl(raw: string | null, fromRaw: string | null): Promise<string> {
   const fallback = "https://flexrz.com";
   const v = decodeMaybe(raw || "");
   const from = decodeMaybe(fromRaw || "");
@@ -45,7 +64,9 @@ function sanitizeCallbackUrl(raw: string | null, fromRaw: string | null): string
   let baseOrigin = fallback;
   if (from) {
     const cleaned = from.replace(/^https?:\/\//i, "").split("/")[0];
-    if (isAllowedHost(cleaned)) baseOrigin = `https://${cleaned}`;
+    if (isAllowedHost(cleaned) || (await isRegisteredTenantDomain(cleaned))) {
+      baseOrigin = `https://${cleaned}`;
+    }
   }
 
   if (!v) return baseOrigin;
@@ -60,10 +81,10 @@ function sanitizeCallbackUrl(raw: string | null, fromRaw: string | null): string
 
   try {
     const u = new URL(v);
-    if (isAllowedHost(u.hostname)) return u.toString();
-  } catch {
-    // ignore
-  }
+    if (isAllowedHost(u.hostname) || (await isRegisteredTenantDomain(u.hostname))) {
+      return u.toString();
+    }
+  } catch {}
 
   return baseOrigin;
 }
@@ -72,19 +93,21 @@ export default function SignoutClient() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    const raw =
-      searchParams.get("callbackUrl") ||
-      searchParams.get("callback") ||
-      "";
+    let cancelled = false;
 
-    const from =
-      searchParams.get("from") ||
-      "";
+    async function run() {
+      const raw = searchParams.get("callbackUrl") || searchParams.get("callback") || "";
+      const from = searchParams.get("from") || "";
+      const callbackUrl = await sanitizeCallbackUrl(raw, from);
+      if (!cancelled) {
+        signOut({ callbackUrl });
+      }
+    }
 
-    const callbackUrl = sanitizeCallbackUrl(raw, from) || "/auth/signin";
-
-    // Trigger NextAuth signout + redirect
-    signOut({ callbackUrl });
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams]);
 
   return <div style={{ padding: 24 }}>Signing you out…</div>;
